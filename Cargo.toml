@@ -1,11 +1,22 @@
 [package]
+edition = "2024"
 name = "some-serial"
 version = "0.1.0"
-edition = "2024"
 
 [dependencies]
-serial-async = "0.2"
 bitflags = "2.8"
+serial-async = "0.2"
 
 [target.'cfg(target_arch = "x86_64")'.dependencies]
 x86_64 = "0.15"
+
+[target.'cfg(target_os = "none")'.dev-dependencies]
+bare-test = "0.6"
+log = "0.4"
+
+[build-dependencies]
+bare-test-macros = "0.2"
+
+[[test]]
+harness = false
+name = "test"
