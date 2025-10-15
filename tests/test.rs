@@ -34,37 +34,53 @@ mod tests {
 
         debug!("UART base address: {:p}, size: {:#x}", base, size);
 
-        let uart = pl011::new(base.as_ptr() as _);
+        // 创建 PL011 实例，使用默认配置
+        let uart = pl011::Pl011::new_no_clock(base.as_ptr() as _);
+
+        info!(
+            "UART created with auto-detected clock frequency: {} Hz",
+            uart.clock_frequency()
+        );
 
         info!("Testing new SerialRegister interface...");
 
-        // 测试基础功能（保持向后兼容）
-        info!("Testing basic read/write operations");
+        // 打开并初始化 UART
+        if let Err(e) = uart.open() {
+            info!("UART open failed: {:?}", e);
+        } else {
+            info!("UART opened successfully");
+        }
 
-        // 测试配置功能
+        // 测试配置功能 - 使用新的配置接口
         info!("Testing configuration methods");
-        if let Err(e) = uart.set_baudrate(115200) {
-            info!("Set baudrate failed: {:?}", e);
+
+        let config = some_serial::Config::new()
+            .baudrate(115200)
+            .data_bits(DataBits::Eight)
+            .stop_bits(StopBits::One)
+            .parity(Parity::None);
+
+        if let Err(e) = uart.set_config(&config) {
+            info!("Set config failed: {:?}", e);
+        } else {
+            let actual_baud = uart.baudrate();
+            let actual_data_bits = uart.data_bits();
+            let actual_stop_bits = uart.stop_bits();
+            let actual_parity = uart.parity();
+
+            info!("Configuration applied successfully:");
+            info!("  Baudrate: {}", actual_baud);
+            info!("  Data bits: {:?}", actual_data_bits);
+            info!("  Stop bits: {:?}", actual_stop_bits);
+            info!("  Parity: {:?}", actual_parity);
         }
 
-        if let Err(e) = uart.set_data_bits(DataBits::Eight) {
-            info!("Set data bits failed: {:?}", e);
-        }
-
-        if let Err(e) = uart.set_stop_bits(StopBits::One) {
-            info!("Set stop bits failed: {:?}", e);
-        }
-
-        if let Err(e) = uart.set_parity(Parity::None) {
-            info!("Set parity failed: {:?}", e);
-        }
-
-        // 测试FIFO功能
+        // 测试FIFO功能（使用 PL011 特有的方法）
         info!("Testing FIFO operations");
         uart.enable_fifo(true);
         uart.set_fifo_trigger_level(8, 8);
 
-        // 测试流控制
+        // 测试流控制（使用 PL011 特有的方法）
         info!("Testing flow control");
         uart.set_rts(true);
         uart.set_dtr(true);
@@ -81,10 +97,40 @@ mod tests {
 
         // 测试状态查询
         info!("Testing status queries");
-        let line_status = uart.get_line_status();
+        let line_status = uart.line_status();
         let modem_status = uart.get_modem_status();
         info!("Line status: {:?}", line_status);
         info!("Modem status: {:?}", modem_status);
+
+        // 测试 FIFO 级别查询
+        info!("Testing FIFO levels");
+        let tx_level = uart.get_tx_fifo_level();
+        let rx_level = uart.get_rx_fifo_level();
+        info!("TX FIFO level: {}, RX FIFO level: {}", tx_level, rx_level);
+
+        // 测试寄存器访问
+        info!("Testing register access");
+        let base_addr = uart.get_base();
+        info!("UART base address: 0x{:x}", base_addr);
+
+        // 测试错误清除
+        uart.clear_error();
+
+        // 测试基本的读写操作（如果硬件可用）
+        info!("Testing basic read/write operations");
+
+        // 尝试写入一个测试字节
+        if let Err(e) = uart.write_byte(b'T') {
+            info!("Write byte failed: {:?}", e);
+        } else {
+            info!("Write byte successful");
+        }
+
+        // 尝试读取一个字节（可能有超时）
+        match uart.read_byte() {
+            Ok(byte) => info!("Read byte successful: 0x{:02x} ('{}')", byte, byte as char),
+            Err(e) => info!("Read byte failed: {:?}", e),
+        }
 
         info!("SerialRegister interface test completed");
     }

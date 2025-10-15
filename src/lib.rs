@@ -32,8 +32,6 @@ pub enum TransferError {
     Parity,
     Framing,
     Break,
-    Timeout,
-    Retry,
 }
 
 // ============================================================================
@@ -89,13 +87,7 @@ bitflags! {
     #[derive(Debug, Clone, Copy)]
     pub struct LineStatus: u32 {
         const DATA_READY = 0x01;
-        const OVERRUN_ERROR = 0x02;
-        const PARITY_ERROR = 0x04;
-        const FRAMING_ERROR = 0x08;
-        const BREAK_INTERRUPT = 0x10;
         const TX_HOLDING_EMPTY = 0x20;
-        const TX_EMPTY = 0x40;
-        const FIFO_ERROR = 0x80;
     }
 }
 
@@ -113,53 +105,164 @@ impl LineStatus {
 // 扩展的SerialRegister接口
 // ============================================================================
 
-pub trait SerialRegister: Clone + Send + Sync {
+// ============================================================================
+// 配置验证和格式化函数
+// ============================================================================
+
+/// 验证串口配置是否有效
+pub fn validate_serial_config(data_bits: DataBits, stop_bits: StopBits, parity: Parity) -> bool {
+    match (data_bits, stop_bits, parity) {
+        // 8 数据位不支持 2 停止位（除非有奇偶校验）
+        (DataBits::Eight, StopBits::Two, Parity::None) => false,
+
+        // 5 数据位不支持 1.5 停止位（我们的枚举中没有这个）
+        (DataBits::Five, StopBits::Two, _) => {
+            // 5 数据位通常配合 1.5 或 2 停止位使用
+            matches!(parity, Parity::Even | Parity::Odd)
+        }
+
+        // 其他组合都是有效的
+        _ => true,
+    }
+}
+
+#[derive(Debug, Clone, Default)]
+pub struct Config {
+    pub baudrate: Option<u32>,
+    pub data_bits: Option<DataBits>,
+    pub stop_bits: Option<StopBits>,
+    pub parity: Option<Parity>,
+}
+
+impl Config {
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    pub fn baudrate(mut self, baudrate: u32) -> Self {
+        self.baudrate = Some(baudrate);
+        self
+    }
+
+    pub fn data_bits(mut self, data_bits: DataBits) -> Self {
+        self.data_bits = Some(data_bits);
+        self
+    }
+
+    pub fn stop_bits(mut self, stop_bits: StopBits) -> Self {
+        self.stop_bits = Some(stop_bits);
+        self
+    }
+
+    pub fn parity(mut self, parity: Parity) -> Self {
+        self.parity = Some(parity);
+        self
+    }
+}
+
+/// 格式化串口配置为可读字符串
+pub fn format_serial_config(
+    baudrate: u32,
+    data_bits: DataBits,
+    stop_bits: StopBits,
+    parity: Parity,
+) -> alloc::string::String {
+    use alloc::format;
+
+    let data_bits_str = match data_bits {
+        DataBits::Five => "5",
+        DataBits::Six => "6",
+        DataBits::Seven => "7",
+        DataBits::Eight => "8",
+    };
+
+    let stop_bits_str = match stop_bits {
+        StopBits::One => "1",
+        StopBits::Two => "2",
+    };
+
+    let parity_str = match parity {
+        Parity::None => "no-parity",
+        Parity::Even => "even-parity",
+        Parity::Odd => "odd-parity",
+        Parity::Mark => "mark-parity",
+        Parity::Space => "space-parity",
+    };
+
+    format!(
+        "{} baud, {}-data bits, {}-stop bits, {}",
+        baudrate, data_bits_str, stop_bits_str, parity_str
+    )
+}
+
+pub trait SerialRegister: Send + Sync {
     // ==================== 基础数据传输 ====================
-    fn write_byte(&self, byte: u8) -> Result<(), TransferError>;
+    fn write_byte(&mut self, byte: u8) -> Result<(), TransferError>;
     fn read_byte(&self) -> Result<u8, TransferError>;
 
     // ==================== 配置管理 ====================
-    /// 设置波特率
-    fn set_baudrate(&self, baudrate: u32) -> Result<(), SerialError>;
-    /// 获取当前波特率
-    fn get_baudrate(&self) -> u32;
+    fn set_config(&mut self, config: &Config) -> Result<(), SerialError>;
 
-    /// 设置数据位数
-    fn set_data_bits(&self, bits: DataBits) -> Result<(), SerialError>;
-    /// 设置停止位数
-    fn set_stop_bits(&self, bits: StopBits) -> Result<(), SerialError>;
-    /// 设置奇偶校验
-    fn set_parity(&self, parity: Parity) -> Result<(), SerialError>;
+    fn baudrate(&self) -> u32;
+    fn data_bits(&self) -> DataBits;
+    fn stop_bits(&self) -> StopBits;
+    fn parity(&self) -> Parity;
 
-    fn open(&self) -> Result<(), SerialError>;
-    fn close(&self) -> Result<(), SerialError>;
+    fn open(&mut self) -> Result<(), SerialError>;
+    fn close(&mut self) -> Result<(), SerialError>;
 
     // ==================== 中断管理 ====================
     /// 使能中断
-    fn enable_interrupts(&self, mask: InterruptMask);
+    fn enable_interrupts(&mut self, mask: InterruptMask);
     /// 禁用中断
-    fn disable_interrupts(&self, mask: InterruptMask);
+    fn disable_interrupts(&mut self, mask: InterruptMask);
     /// 获取并清除所有中断状态
-    fn clean_interrupt_status(&self) -> InterruptMask;
+    fn clean_interrupt_status(&mut self) -> InterruptMask;
 
     // ==================== 传输状态查询 ====================
 
-    /// 获取发送FIFO级别
-    fn get_tx_fifo_level(&self) -> u16;
-    /// 获取接收FIFO级别
-    fn get_rx_fifo_level(&self) -> u16;
-
     /// 获取线路状态
-    fn get_line_status(&self) -> LineStatus;
-    /// 清除错误状态
-    fn clear_error(&self);
+    fn line_status(&self) -> LineStatus;
 
     // ==================== 底层寄存器访问 ====================
     /// 直接读取寄存器
     fn read_reg(&self, offset: usize) -> u32;
     /// 直接写入寄存器
-    fn write_reg(&self, offset: usize, value: u32);
+    fn write_reg(&mut self, offset: usize, value: u32);
 
     fn get_base(&self) -> usize;
     fn set_base(&mut self, base: usize);
+
+    fn read_buf(&mut self, buf: &mut [u8]) -> Result<usize, TransferError> {
+        let mut read_count = 0;
+        for byte in buf.iter_mut() {
+            if !self.line_status().can_read() {
+                break;
+            }
+
+            match self.read_byte() {
+                Ok(b) => {
+                    *byte = b;
+                    read_count += 1;
+                }
+                Err(e) => return Err(e),
+            }
+        }
+        Ok(read_count)
+    }
+
+    fn write_buf(&mut self, buf: &[u8]) -> Result<usize, TransferError> {
+        let mut write_count = 0;
+        for &byte in buf.iter() {
+            if !self.line_status().can_write() {
+                break;
+            }
+
+            match self.write_byte(byte) {
+                Ok(()) => write_count += 1,
+                Err(e) => return Err(e),
+            }
+        }
+        Ok(write_count)
+    }
 }

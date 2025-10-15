@@ -8,10 +8,9 @@
 extern crate alloc;
 
 use some_serial::{
-    SerialRegister, RegisterAccess, BaudrateSupport, DataBits, StopBits, Parity,
-    PowerMode, DmaDirection, InterruptMask, LineStatus, ModemStatus,
-    MemoryMappedUart, validate_serial_config, format_serial_config,
-    is_valid_baudrate, recommended_fifo_trigger_level
+    BaudrateSupport, DataBits, DmaDirection, InterruptMask, LineStatus, MemoryMappedUart,
+    ModemStatus, Parity, PowerMode, RegisterAccess, SerialRegister, StopBits, format_serial_config,
+    is_valid_baudrate, recommended_fifo_trigger_level, validate_serial_config,
 };
 
 /// 演示基础串口配置
@@ -50,7 +49,12 @@ fn demo_basic_config(uart: &impl SerialRegister) {
 
     // 读取并显示当前配置
     let current_baudrate = uart.get_baudrate();
-    let config_str = format_serial_config(current_baudrate, DataBits::Eight, StopBits::One, Parity::None);
+    let config_str = format_serial_config(
+        current_baudrate,
+        DataBits::Eight,
+        StopBits::One,
+        Parity::None,
+    );
     println!("当前配置: {}", config_str);
 }
 
@@ -131,15 +135,15 @@ fn demo_status_query(uart: &impl SerialRegister) {
     println!("  可以写入数据: {}", can_write);
 
     // 查询线路状态
-    let line_status = uart.get_line_status();
+    let line_status = uart.line_status();
     println!("线路状态: {:?}", line_status);
 
     // 如果有错误，清除错误状态
     if line_status.intersects(
-        LineStatus::OVERRUN_ERROR |
-        LineStatus::PARITY_ERROR |
-        LineStatus::FRAMING_ERROR |
-        LineStatus::BREAK_INTERRUPT
+        LineStatus::OVERRUN_ERROR
+            | LineStatus::PARITY_ERROR
+            | LineStatus::FRAMING_ERROR
+            | LineStatus::BREAK_INTERRUPT,
     ) {
         println!("检测到错误状态，正在清除...");
         uart.clear_error();
@@ -193,7 +197,8 @@ fn demo_data_transfer(uart: &impl SerialRegister) {
         if uart.can_read() {
             let byte = uart.read_byte();
             received_data.push(byte);
-            if byte == b'!' { // 假设'!'是结束符
+            if byte == b'!' {
+                // 假设'!'是结束符
                 break;
             }
         }
@@ -224,7 +229,10 @@ fn demo_config_validation() {
     println!("有效配置验证:");
     for (data_bits, stop_bits, parity) in &valid_configs {
         let is_valid = validate_serial_config(*data_bits, *stop_bits, *parity);
-        println!("  {:?} + {:?} + {:?} -> {}", data_bits, stop_bits, parity, is_valid);
+        println!(
+            "  {:?} + {:?} + {:?} -> {}",
+            data_bits, stop_bits, parity, is_valid
+        );
     }
 
     // 测试无效配置
@@ -236,7 +244,10 @@ fn demo_config_validation() {
     println!("无效配置验证:");
     for (data_bits, stop_bits, parity) in &invalid_configs {
         let is_valid = validate_serial_config(*data_bits, *stop_bits, *parity);
-        println!("  {:?} + {:?} + {:?} -> {}", data_bits, stop_bits, parity, is_valid);
+        println!(
+            "  {:?} + {:?} + {:?} -> {}",
+            data_bits, stop_bits, parity, is_valid
+        );
     }
 
     // 测试波特率验证
@@ -308,7 +319,7 @@ fn main() {
     // 创建一个示例UART实例（使用虚拟地址）
     // 在实际应用中，这里应该是真实的硬件地址
     let uart_base = 0x1000_0000; // 虚拟基地址
-    let clock_freq = 18_432_000;  // 18.432MHz时钟
+    let clock_freq = 18_432_000; // 18.432MHz时钟
     let uart = MemoryMappedUart::new(uart_base, clock_freq);
 
     // 注意：MemoryMappedUart实现了RegisterAccess和BaudrateSupport，
