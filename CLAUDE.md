@@ -131,3 +131,38 @@ FBRD = integer((BAUDDIV - IBRD) * 64 + 0.5)
 - Attempts to detect from existing register settings
 - Falls back to 24MHz default if detection fails
 - Supports 1MHz-100MHz range validation
+
+#### Loopback Functionality
+
+- **Hardware Support**: Uses PL011's LBE (Loop Back Enable) bit in UARTCR register
+- **Trait Methods**:
+  - `enable_loopback()` - Enables loopback mode
+  - `disable_loopback()` - Disables loopback mode
+  - `is_loopback_enabled()` - Checks current loopback status
+- **Usage**: Enables self-testing by connecting transmitter output directly to receiver input
+- **Testing**: Comprehensive test suite includes basic loopback, stress tests, and edge cases
+
+### Test Structure
+
+- **`test_pl011`**: Main test with comprehensive loopback functionality
+- **`test_pl011_loopback_stress`**: Stress testing with multiple data patterns and iterations
+- **`test_pl011_loopback_edge_cases`**: Edge case testing including single bytes and mode toggling
+- **Example**: `examples/loopback_demo.rs` demonstrates usage patterns
+
+### Test Coverage
+
+- Multiple string patterns (different lengths, special characters, binary data)
+- Data integrity verification (sent vs received comparison)
+- Loopback mode enable/disable functionality
+- Error handling and timeout management
+- Single byte and empty data testing
+
+### Running Tests
+
+```bash
+# Build tests
+cargo build --target aarch64-unknown-none-softfloat
+
+# Test execution depends on your bare-metal environment
+# Tests use the bare-test framework for QEMU or hardware targets
+```

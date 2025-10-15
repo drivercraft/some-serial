@@ -588,6 +588,18 @@ impl SerialRegister for Pl011 {
     fn clock_freq(&self) -> u32 {
         self.clock_freq
     }
+
+    fn enable_loopback(&mut self) {
+        self.registers().uartcr.modify(UARTCR::LBE::SET);
+    }
+
+    fn disable_loopback(&mut self) {
+        self.registers().uartcr.modify(UARTCR::LBE::CLEAR);
+    }
+
+    fn is_loopback_enabled(&self) -> bool {
+        self.registers().uartcr.is_set(UARTCR::LBE)
+    }
 }
 
 // 额外的便利方法，用于 FIFO 和流控制

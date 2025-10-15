@@ -157,6 +157,14 @@ pub trait SerialRegister: Send + Sync {
     fn open(&mut self);
     fn close(&mut self);
 
+    // ==================== 回环控制 ====================
+    /// 启用回环模式
+    fn enable_loopback(&mut self);
+    /// 禁用回环模式
+    fn disable_loopback(&mut self);
+    /// 检查回环模式是否启用
+    fn is_loopback_enabled(&self) -> bool;
+
     // ==================== 中断管理 ====================
     /// 使能中断
     fn enable_interrupts(&mut self, mask: InterruptMask);
