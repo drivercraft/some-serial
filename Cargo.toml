@@ -11,6 +11,7 @@ mbarrier = "0.1"
 rdif-base = {version = "0.7"}
 thiserror = {version = "2.0", default-features = false}
 tock-registers = "0.10"
+rdif-serial = {path = "/home/zhourui/opensource/rdrive/interface/rdif-serial", version = "0.5"}
 
 [target.'cfg(target_arch = "x86_64")'.dependencies]
 x86_64 = "0.15"

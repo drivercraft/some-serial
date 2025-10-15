@@ -8,9 +8,10 @@ extern crate bare_test;
 #[bare_test::tests]
 mod tests {
 
-    use core::ptr::NonNull;
     use alloc::vec;
     use alloc::vec::Vec;
+    use core::ptr::NonNull;
+    use rdif_serial::Interface as _;
 
     use super::*;
     use bare_test::{
@@ -21,7 +22,7 @@ mod tests {
     };
     use log::{debug, info};
     use some_serial::pl011;
-    use some_serial::{DataBits, Parity, SerialRegister, StopBits};
+    use some_serial::{DataBits, Parity, StopBits};
 
     #[derive(Debug)]
     struct SInfo {
@@ -86,7 +87,9 @@ mod tests {
         // 测试基本的读写操作（如果硬件可用）
         info!("Testing basic read/write operations");
 
-        uart.write_buf(b"Hello, UART!\n");
+        let mut tx = uart.take_tx().expect("Failed to take TX");
+        let mut rx = uart.take_rx().expect("Failed to take RX");
+        tx.send(b"Hello, UART!\n");
 
         // 测试回环功能
         info!("Testing loopback functionality");
@@ -129,22 +132,11 @@ mod tests {
                 core::str::from_utf8(test_str).unwrap_or("[invalid utf8]")
             );
 
-            // 清空接收缓冲区
-            while uart.line_status().can_read() {
-                let _ = uart.read_byte();
-            }
-
             // 发送测试字符串
-            let bytes_written = uart.write_buf(test_str);
+            let bytes_written = (test_str);
             info!("Sent {} bytes", bytes_written);
 
-            // 等待传输完成
-            for _ in 0..10000 {
-                if uart.line_status().can_read() {
-                    break;
-                }
-                core::hint::spin_loop();
-            }
+             
 
             // 读取回环的数据
             let mut read_buf = [0u8; 64];
@@ -153,7 +145,7 @@ mod tests {
             let max_attempts = 10000;
 
             while total_read < bytes_written && attempts < max_attempts {
-                match uart.read_buf(&mut read_buf[total_read..]) {
+                match rx.recive(&mut read_buf[total_read..]) {
                     Ok(bytes_read) => {
                         if bytes_read == 0 {
                             attempts += 1;
@@ -229,7 +221,7 @@ mod tests {
                 get_uart(&["arm,pl011"])
             }
         };
-        let mut uart = pl011::Pl011::new(info.base, info.clk);
+        let mut uart = pl011::Pl011::new_raw(info.base, info.clk);
 
         uart.open();
 
@@ -370,7 +362,7 @@ mod tests {
                 get_uart(&["arm,pl011"])
             }
         };
-        let mut uart = pl011::Pl011::new(info.base, info.clk);
+        let mut uart = pl011::Pl011::new_raw(info.base, info.clk);
 
         uart.open();
         uart.enable_loopback();
@@ -565,12 +557,16 @@ mod tests {
             let base = iomap((addr.address as usize).into(), size);
 
             // 如果没有时钟信息，使用默认值
-            let clk = node.clocks()
+            let clk = node
+                .clocks()
                 .next()
                 .and_then(|clk| clk.clock_frequency)
                 .unwrap_or(24_000_000); // 默认 24MHz
 
-            info!("Using secondary PL011 at address 0x{:x}, clock: {} Hz", addr.address, clk);
+            info!(
+                "Using secondary PL011 at address 0x{:x}, clock: {} Hz",
+                addr.address, clk
+            );
 
             Some(SInfo {
                 base,
@@ -578,7 +574,10 @@ mod tests {
                 irq: irq_info,
             })
         } else {
-            info!("No secondary PL011 device found, only {} PL011 devices available", pl011_devices.len());
+            info!(
+                "No secondary PL011 device found, only {} PL011 devices available",
+                pl011_devices.len()
+            );
             None
         }
     }

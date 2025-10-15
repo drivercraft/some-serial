@@ -1,11 +1,10 @@
 use core::ptr::NonNull;
 
+use crate::Register;
+use rdif_serial::{RegisterTransferError as TransferError, Serial, SerialRaw};
 use tock_registers::{interfaces::*, register_bitfields, register_structs, registers::*};
 
-use crate::{
-    Config, ConfigError, DataBits, InterruptMask, LineStatus, Parity, SerialRegister, StopBits,
-    TransferError,
-};
+use crate::{Config, ConfigError, DataBits, InterruptMask, LineStatus, Parity, StopBits};
 
 register_bitfields! [
     u32,
@@ -183,6 +182,7 @@ register_structs! {
 unsafe impl Sync for Pl011Registers {}
 
 /// PL011 UART 驱动结构体
+#[derive(Clone)]
 pub struct Pl011 {
     base: NonNull<Pl011Registers>,
     clock_freq: u32,
@@ -196,10 +196,10 @@ impl Pl011 {
     ///
     /// # Arguments
     /// * `base` - UART 寄存器基地址
-    pub fn new_no_clock(base: NonNull<u8>) -> Self {
+    pub fn new_raw_no_clock(base: NonNull<u8>) -> SerialRaw<Self> {
         // 自动检测时钟频率或使用合理的默认值
         let clock_freq = Self::detect_clock_frequency(base.as_ptr() as usize);
-        Self::new(base, clock_freq)
+        Self::new_raw(base, clock_freq)
     }
 
     /// 创建新的 PL011 实例（指定时钟频率）
@@ -207,11 +207,18 @@ impl Pl011 {
     /// # Arguments
     /// * `base` - UART 寄存器基地址
     /// * `clock_freq` - UART 时钟频率 (Hz)
-    pub fn new(base: NonNull<u8>, clock_freq: u32) -> Self {
-        Self {
+    pub fn new_raw(base: NonNull<u8>, clock_freq: u32) -> SerialRaw<Self> {
+        SerialRaw::new(Self {
             base: base.cast(),
             clock_freq,
-        }
+        })
+    }
+
+    pub fn new(base: NonNull<u8>, clock_freq: u32) -> Serial<Self> {
+        Serial::new(Self {
+            base: base.cast(),
+            clock_freq,
+        })
     }
 
     fn registers(&self) -> &Pl011Registers {
@@ -346,7 +353,7 @@ impl Pl011 {
     }
 }
 
-impl SerialRegister for Pl011 {
+impl Register for Pl011 {
     fn write_byte(&mut self, byte: u8) {
         self.registers().uartdr.write(UARTDR::DATA.val(byte as u32));
     }
@@ -486,15 +493,15 @@ impl SerialRegister for Pl011 {
         if mask.contains(InterruptMask::TX_EMPTY) {
             imsc |= 1 << 5; // TXIM
         }
-        if mask.contains(InterruptMask::RX_LINE_STATUS) {
-            imsc |= (1 << 7) | (1 << 8) | (1 << 9) | (1 << 10); // FEIM, PEIM, BEIM, OEIM
-        }
-        if mask.contains(InterruptMask::MODEM_STATUS) {
-            imsc |= (1 << 0) | (1 << 1) | (1 << 2) | (1 << 3); // RIMIM, CTSMIM, DCDMIM, DSRMIM
-        }
-        if mask.contains(InterruptMask::CHARACTER_TIMEOUT) {
-            imsc |= 1 << 6; // RTIM
-        }
+        // if mask.contains(InterruptMask::RX_LINE_STATUS) {
+        //     imsc |= (1 << 7) | (1 << 8) | (1 << 9) | (1 << 10); // FEIM, PEIM, BEIM, OEIM
+        // }
+        // if mask.contains(InterruptMask::MODEM_STATUS) {
+        //     imsc |= (1 << 0) | (1 << 1) | (1 << 2) | (1 << 3); // RIMIM, CTSMIM, DCDMIM, DSRMIM
+        // }
+        // if mask.contains(InterruptMask::CHARACTER_TIMEOUT) {
+        //     imsc |= 1 << 6; // RTIM
+        // }
 
         self.registers().uartimsc.set(imsc);
     }
@@ -508,15 +515,15 @@ impl SerialRegister for Pl011 {
         if mask.contains(InterruptMask::TX_EMPTY) {
             imsc |= 1 << 5; // TXIM
         }
-        if mask.contains(InterruptMask::RX_LINE_STATUS) {
-            imsc |= (1 << 7) | (1 << 8) | (1 << 9) | (1 << 10); // FEIM, PEIM, BEIM, OEIM
-        }
-        if mask.contains(InterruptMask::MODEM_STATUS) {
-            imsc |= (1 << 0) | (1 << 1) | (1 << 2) | (1 << 3); // RIMIM, CTSMIM, DCDMIM, DSRMIM
-        }
-        if mask.contains(InterruptMask::CHARACTER_TIMEOUT) {
-            imsc |= 1 << 6; // RTIM
-        }
+        // if mask.contains(InterruptMask::RX_LINE_STATUS) {
+        //     imsc |= (1 << 7) | (1 << 8) | (1 << 9) | (1 << 10); // FEIM, PEIM, BEIM, OEIM
+        // }
+        // if mask.contains(InterruptMask::MODEM_STATUS) {
+        //     imsc |= (1 << 0) | (1 << 1) | (1 << 2) | (1 << 3); // RIMIM, CTSMIM, DCDMIM, DSRMIM
+        // }
+        // if mask.contains(InterruptMask::CHARACTER_TIMEOUT) {
+        //     imsc |= 1 << 6; // RTIM
+        // }
 
         // 读取当前值并清除相应的中断掩码位
         let current = self.registers().uartimsc.get();
@@ -535,15 +542,15 @@ impl SerialRegister for Pl011 {
         if mis & (1 << 5) != 0 {
             mask |= InterruptMask::TX_EMPTY;
         }
-        if mis & ((1 << 7) | (1 << 8) | (1 << 9) | (1 << 10)) != 0 {
-            mask |= InterruptMask::RX_LINE_STATUS;
-        }
-        if mis & ((1 << 0) | (1 << 1) | (1 << 2) | (1 << 3)) != 0 {
-            mask |= InterruptMask::MODEM_STATUS;
-        }
-        if mis & (1 << 6) != 0 {
-            mask |= InterruptMask::CHARACTER_TIMEOUT;
-        }
+        // if mis & ((1 << 7) | (1 << 8) | (1 << 9) | (1 << 10)) != 0 {
+        //     mask |= InterruptMask::RX_LINE_STATUS;
+        // }
+        // if mis & ((1 << 0) | (1 << 1) | (1 << 2) | (1 << 3)) != 0 {
+        //     mask |= InterruptMask::MODEM_STATUS;
+        // }
+        // if mis & (1 << 6) != 0 {
+        //     mask |= InterruptMask::CHARACTER_TIMEOUT;
+        // }
 
         // 清除所有中断状态
         self.registers().uarticr.set(0x7FF); // 清除所有可清除的中断

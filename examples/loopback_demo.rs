@@ -39,7 +39,7 @@ mod tests {
         };
 
         // 创建 PL011 实例
-        let mut uart = pl011::Pl011::new(base, clock_freq);
+        let mut uart = pl011::Pl011::new_raw(base, clock_freq);
 
         // 配置 UART
         let config = some_serial::Config::new()
@@ -134,7 +134,7 @@ mod tests {
             }
         };
 
-        let mut uart = pl011::Pl011::new(base, clock_freq);
+        let mut uart = pl011::Pl011::new_raw(base, clock_freq);
         uart.open();
 
         // 演示回环控制方法
