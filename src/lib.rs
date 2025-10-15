@@ -4,6 +4,8 @@ extern crate alloc;
 
 use bitflags::bitflags;
 
+pub mod pl011;
+
 // ============================================================================
 // 错误类型定义
 // ============================================================================
@@ -22,6 +24,16 @@ pub enum SerialError {
     RegisterError,
     /// 超时错误
     Timeout,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum TransferError {
+    Overrun,
+    Parity,
+    Framing,
+    Break,
+    Timeout,
+    Retry,
 }
 
 // ============================================================================
@@ -56,44 +68,25 @@ pub enum Parity {
     Space,
 }
 
-/// 电源模式配置
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum PowerMode {
-    Normal,
-    LowPower,
-    Off,
-}
-
 // ============================================================================
 // 状态标志类型
 // ============================================================================
 
 bitflags! {
-    /// 中断使能掩码
+    /// 中断状态标志
+    #[derive(Debug, Clone, Copy)]
     pub struct InterruptMask: u32 {
         const RX_AVAILABLE = 0x01;
         const TX_EMPTY = 0x02;
         const RX_LINE_STATUS = 0x04;
         const MODEM_STATUS = 0x08;
         const CHARACTER_TIMEOUT = 0x10;
-        const ALL = 0x1F;
-    }
-}
-
-bitflags! {
-    /// 中断状态标志
-    pub struct InterruptStatus: u32 {
-        const RX_AVAILABLE = 0x01;
-        const TX_EMPTY = 0x02;
-        const RX_LINE_STATUS = 0x04;
-        const MODEM_STATUS = 0x08;
-        const CHARACTER_TIMEOUT = 0x10;
-        const PENDING = 0x01;
     }
 }
 
 bitflags! {
     /// 线路状态标志
+    #[derive(Debug, Clone, Copy)]
     pub struct LineStatus: u32 {
         const DATA_READY = 0x01;
         const OVERRUN_ERROR = 0x02;
@@ -106,16 +99,24 @@ bitflags! {
     }
 }
 
+impl LineStatus {
+    pub fn can_read(&self) -> bool {
+        self.contains(LineStatus::DATA_READY)
+    }
+
+    pub fn can_write(&self) -> bool {
+        self.contains(LineStatus::TX_HOLDING_EMPTY)
+    }
+}
+
 // ============================================================================
 // 扩展的SerialRegister接口
 // ============================================================================
 
 pub trait SerialRegister: Clone + Send + Sync {
-    // ==================== 基础数据传输（保持向后兼容） ====================
-    fn write_byte(&self, byte: u8);
-    fn read_byte(&self) -> u8;
-    fn can_read(&self) -> bool;
-    fn can_write(&self) -> bool;
+    // ==================== 基础数据传输 ====================
+    fn write_byte(&self, byte: u8) -> Result<(), TransferError>;
+    fn read_byte(&self) -> Result<u8, TransferError>;
 
     // ==================== 配置管理 ====================
     /// 设置波特率
@@ -138,16 +139,11 @@ pub trait SerialRegister: Clone + Send + Sync {
     fn enable_interrupts(&self, mask: InterruptMask);
     /// 禁用中断
     fn disable_interrupts(&self, mask: InterruptMask);
-    /// 获取中断状态
-    fn get_interrupt_status(&self) -> InterruptStatus;
-    /// 清除中断状态
-    fn clear_interrupt_status(&self, mask: InterruptStatus);
+    /// 获取并清除所有中断状态
+    fn clean_interrupt_status(&self) -> InterruptMask;
 
     // ==================== 传输状态查询 ====================
-    /// 检查发送寄存器是否为空
-    fn is_tx_empty(&self) -> bool;
-    /// 检查接收FIFO是否为空
-    fn is_rx_empty(&self) -> bool;
+
     /// 获取发送FIFO级别
     fn get_tx_fifo_level(&self) -> u16;
     /// 获取接收FIFO级别
@@ -163,9 +159,7 @@ pub trait SerialRegister: Clone + Send + Sync {
     fn read_reg(&self, offset: usize) -> u32;
     /// 直接写入寄存器
     fn write_reg(&self, offset: usize, value: u32);
-    /// 修改寄存器位
-    fn modify_reg(&self, offset: usize, mask: u32, set: u32);
 
-    fn mmio_base(&self) -> usize;
-    fn set_mmio_base(&mut self, base: usize);
+    fn get_base(&self) -> usize;
+    fn set_base(&mut self, base: usize);
 }
