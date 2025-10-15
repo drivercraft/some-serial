@@ -5,15 +5,18 @@ version = "0.1.0"
 
 [dependencies]
 bitflags = "2.8"
+dma-api = {version = "0.5", features = ["alloc"]}
 log = "0.4"
-tock-registers = "0.10"
 mbarrier = "0.1"
+rdif-base = {version = "0.7"}
+thiserror = {version = "2.0", default-features = false}
+tock-registers = "0.10"
 
 [target.'cfg(target_arch = "x86_64")'.dependencies]
 x86_64 = "0.15"
 
 [target.'cfg(target_os = "none")'.dev-dependencies]
-bare-test = "0.6"
+bare-test = "0.7"
 
 [build-dependencies]
 bare-test-macros = "0.2"

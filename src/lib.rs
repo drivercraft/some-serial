@@ -1,8 +1,9 @@
 #![no_std]
 
-extern crate alloc;
+use core::ptr::NonNull;
 
 use bitflags::bitflags;
+use mbarrier::rmb;
 
 pub mod pl011;
 
@@ -11,7 +12,7 @@ pub mod pl011;
 // ============================================================================
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum SerialError {
+pub enum ConfigError {
     /// 无效的波特率
     InvalidBaudrate,
     /// 不支持的数据位配置
@@ -26,11 +27,15 @@ pub enum SerialError {
     Timeout,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(thiserror::Error, Debug, Clone, Copy, PartialEq, Eq)]
 pub enum TransferError {
-    Overrun,
+    #[error("Data overrun")]
+    Overrun(u8),
+    #[error("Parity error")]
     Parity,
+    #[error("Framing error")]
     Framing,
+    #[error("Break condition")]
     Break,
 }
 
@@ -101,31 +106,6 @@ impl LineStatus {
     }
 }
 
-// ============================================================================
-// 扩展的SerialRegister接口
-// ============================================================================
-
-// ============================================================================
-// 配置验证和格式化函数
-// ============================================================================
-
-/// 验证串口配置是否有效
-pub fn validate_serial_config(data_bits: DataBits, stop_bits: StopBits, parity: Parity) -> bool {
-    match (data_bits, stop_bits, parity) {
-        // 8 数据位不支持 2 停止位（除非有奇偶校验）
-        (DataBits::Eight, StopBits::Two, Parity::None) => false,
-
-        // 5 数据位不支持 1.5 停止位（我们的枚举中没有这个）
-        (DataBits::Five, StopBits::Two, _) => {
-            // 5 数据位通常配合 1.5 或 2 停止位使用
-            matches!(parity, Parity::Even | Parity::Odd)
-        }
-
-        // 其他组合都是有效的
-        _ => true,
-    }
-}
-
 #[derive(Debug, Clone, Default)]
 pub struct Config {
     pub baudrate: Option<u32>,
@@ -160,56 +140,22 @@ impl Config {
     }
 }
 
-/// 格式化串口配置为可读字符串
-pub fn format_serial_config(
-    baudrate: u32,
-    data_bits: DataBits,
-    stop_bits: StopBits,
-    parity: Parity,
-) -> alloc::string::String {
-    use alloc::format;
-
-    let data_bits_str = match data_bits {
-        DataBits::Five => "5",
-        DataBits::Six => "6",
-        DataBits::Seven => "7",
-        DataBits::Eight => "8",
-    };
-
-    let stop_bits_str = match stop_bits {
-        StopBits::One => "1",
-        StopBits::Two => "2",
-    };
-
-    let parity_str = match parity {
-        Parity::None => "no-parity",
-        Parity::Even => "even-parity",
-        Parity::Odd => "odd-parity",
-        Parity::Mark => "mark-parity",
-        Parity::Space => "space-parity",
-    };
-
-    format!(
-        "{} baud, {}-data bits, {}-stop bits, {}",
-        baudrate, data_bits_str, stop_bits_str, parity_str
-    )
-}
-
 pub trait SerialRegister: Send + Sync {
     // ==================== 基础数据传输 ====================
-    fn write_byte(&mut self, byte: u8) -> Result<(), TransferError>;
+    fn write_byte(&mut self, byte: u8);
     fn read_byte(&self) -> Result<u8, TransferError>;
 
     // ==================== 配置管理 ====================
-    fn set_config(&mut self, config: &Config) -> Result<(), SerialError>;
+    fn set_config(&mut self, config: &Config) -> Result<(), ConfigError>;
 
     fn baudrate(&self) -> u32;
     fn data_bits(&self) -> DataBits;
     fn stop_bits(&self) -> StopBits;
     fn parity(&self) -> Parity;
+    fn clock_freq(&self) -> u32;
 
-    fn open(&mut self) -> Result<(), SerialError>;
-    fn close(&mut self) -> Result<(), SerialError>;
+    fn open(&mut self);
+    fn close(&mut self);
 
     // ==================== 中断管理 ====================
     /// 使能中断
@@ -231,38 +177,45 @@ pub trait SerialRegister: Send + Sync {
     fn write_reg(&mut self, offset: usize, value: u32);
 
     fn get_base(&self) -> usize;
-    fn set_base(&mut self, base: usize);
+    fn set_base(&mut self, base: NonNull<u8>);
 
     fn read_buf(&mut self, buf: &mut [u8]) -> Result<usize, TransferError> {
         let mut read_count = 0;
+        let mut overrun = false;
         for byte in buf.iter_mut() {
             if !self.line_status().can_read() {
+                if overrun {
+                    return Err(TransferError::Overrun(0));
+                }
                 break;
             }
-
+            rmb();
             match self.read_byte() {
-                Ok(b) => {
-                    *byte = b;
-                    read_count += 1;
+                Ok(b) => *byte = b,
+                Err(TransferError::Overrun(u8)) => {
+                    overrun = true;
+                    *byte = u8;
                 }
                 Err(e) => return Err(e),
             }
+
+            *byte = self.read_byte()?;
+            read_count += 1;
         }
+
         Ok(read_count)
     }
 
-    fn write_buf(&mut self, buf: &[u8]) -> Result<usize, TransferError> {
+    fn write_buf(&mut self, buf: &[u8]) -> usize {
         let mut write_count = 0;
         for &byte in buf.iter() {
             if !self.line_status().can_write() {
                 break;
             }
-
-            match self.write_byte(byte) {
-                Ok(()) => write_count += 1,
-                Err(e) => return Err(e),
-            }
+            rmb();
+            self.write_byte(byte);
+            write_count += 1;
         }
-        Ok(write_count)
+        write_count
     }
 }

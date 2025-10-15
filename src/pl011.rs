@@ -1,8 +1,10 @@
+use core::ptr::NonNull;
+
 use tock_registers::{interfaces::*, register_bitfields, register_structs, registers::*};
 
 use crate::{
-    Config, DataBits, InterruptMask, LineStatus, ModemStatus, Parity, SerialError, SerialRegister,
-    StopBits, TransferError,
+    Config, ConfigError, DataBits, InterruptMask, LineStatus, Parity, SerialRegister, StopBits,
+    TransferError,
 };
 
 register_bitfields! [
@@ -181,29 +183,23 @@ register_structs! {
 unsafe impl Sync for Pl011Registers {}
 
 /// PL011 UART 驱动结构体
-#[derive(Clone)]
 pub struct Pl011 {
-    base: usize,
+    base: NonNull<Pl011Registers>,
     clock_freq: u32,
-    registers: &'static Pl011Registers,
 }
+
+unsafe impl Send for Pl011 {}
+unsafe impl Sync for Pl011 {}
 
 impl Pl011 {
     /// 创建新的 PL011 实例（仅基地址，使用默认配置）
     ///
     /// # Arguments
     /// * `base` - UART 寄存器基地址
-    pub fn new_no_clock(base: usize) -> Self {
+    pub fn new_no_clock(base: NonNull<u8>) -> Self {
         // 自动检测时钟频率或使用合理的默认值
-        let clock_freq = Self::detect_clock_frequency(base);
-
-        let registers = unsafe { &*(base as *const Pl011Registers) };
-
-        Self {
-            base,
-            clock_freq,
-            registers,
-        }
+        let clock_freq = Self::detect_clock_frequency(base.as_ptr() as usize);
+        Self::new(base, clock_freq)
     }
 
     /// 创建新的 PL011 实例（指定时钟频率）
@@ -211,14 +207,15 @@ impl Pl011 {
     /// # Arguments
     /// * `base` - UART 寄存器基地址
     /// * `clock_freq` - UART 时钟频率 (Hz)
-    pub fn new(base: usize, clock_freq: u32) -> Self {
-        let registers = unsafe { &*(base as *const Pl011Registers) };
-
+    pub fn new(base: NonNull<u8>, clock_freq: u32) -> Self {
         Self {
-            base,
+            base: base.cast(),
             clock_freq,
-            registers,
         }
+    }
+
+    fn registers(&self) -> &Pl011Registers {
+        unsafe { self.base.as_ref() }
     }
 
     /// 自动检测或确定合理的时钟频率
@@ -246,7 +243,7 @@ impl Pl011 {
     }
 
     // 内部私有方法，用于配置
-    fn set_baudrate_internal(&self, baudrate: u32) -> Result<(), SerialError> {
+    fn set_baudrate_internal(&self, baudrate: u32) -> Result<(), ConfigError> {
         // PL011 波特率计算公式：
         // BAUDDIV = (FUARTCLK / (16 * Baud rate))
         // IBRD = integer(BAUDDIV)
@@ -257,20 +254,20 @@ impl Pl011 {
         let fbrd = (remainder * 64 + (16 * baudrate / 2)) / (16 * baudrate);
 
         if bauddiv == 0 || bauddiv > 0xFFFF {
-            return Err(SerialError::InvalidBaudrate);
+            return Err(ConfigError::InvalidBaudrate);
         }
 
-        self.registers
+        self.registers()
             .uartibrd
             .write(UARTIBRD::BAUD_DIVINT.val(bauddiv));
-        self.registers
+        self.registers()
             .uartfbrd
             .write(UARTFBRD::BAUD_DIVFRAC.val(fbrd));
 
         Ok(())
     }
 
-    fn set_data_bits_internal(&self, bits: DataBits) -> Result<(), SerialError> {
+    fn set_data_bits_internal(&self, bits: DataBits) -> Result<(), ConfigError> {
         let wlen = match bits {
             DataBits::Five => UARTLCR_H::WLEN::FiveBit,
             DataBits::Six => UARTLCR_H::WLEN::SixBit,
@@ -278,46 +275,46 @@ impl Pl011 {
             DataBits::Eight => UARTLCR_H::WLEN::EightBit,
         };
 
-        self.registers.uartlcr_h.modify(wlen);
+        self.registers().uartlcr_h.modify(wlen);
         Ok(())
     }
 
-    fn set_stop_bits_internal(&self, bits: StopBits) -> Result<(), SerialError> {
+    fn set_stop_bits_internal(&self, bits: StopBits) -> Result<(), ConfigError> {
         match bits {
-            StopBits::One => self.registers.uartlcr_h.modify(UARTLCR_H::STP2::CLEAR),
-            StopBits::Two => self.registers.uartlcr_h.modify(UARTLCR_H::STP2::SET),
+            StopBits::One => self.registers().uartlcr_h.modify(UARTLCR_H::STP2::CLEAR),
+            StopBits::Two => self.registers().uartlcr_h.modify(UARTLCR_H::STP2::SET),
         }
 
         Ok(())
     }
 
-    fn set_parity_internal(&self, parity: Parity) -> Result<(), SerialError> {
+    fn set_parity_internal(&self, parity: Parity) -> Result<(), ConfigError> {
         match parity {
             Parity::None => {
                 // PEN = 0, 无奇偶校验
-                self.registers.uartlcr_h.modify(UARTLCR_H::PEN::CLEAR);
+                self.registers().uartlcr_h.modify(UARTLCR_H::PEN::CLEAR);
             }
             Parity::Odd => {
                 // PEN = 1, EPS = 0 (奇校验), SPS = 0
-                self.registers
+                self.registers()
                     .uartlcr_h
                     .modify(UARTLCR_H::PEN::SET + UARTLCR_H::EPS::CLEAR + UARTLCR_H::SPS::CLEAR);
             }
             Parity::Even => {
                 // PEN = 1, EPS = 1 (偶校验), SPS = 0
-                self.registers
+                self.registers()
                     .uartlcr_h
                     .modify(UARTLCR_H::PEN::SET + UARTLCR_H::EPS::SET + UARTLCR_H::SPS::CLEAR);
             }
             Parity::Mark => {
                 // PEN = 1, SPS = 1, EPS = 0 (奇校验)
-                self.registers
+                self.registers()
                     .uartlcr_h
                     .modify(UARTLCR_H::PEN::SET + UARTLCR_H::EPS::CLEAR + UARTLCR_H::SPS::SET);
             }
             Parity::Space => {
                 // PEN = 1, EPS = 1 (偶校验), SPS = 1
-                self.registers
+                self.registers()
                     .uartlcr_h
                     .modify(UARTLCR_H::PEN::SET + UARTLCR_H::EPS::SET + UARTLCR_H::SPS::SET);
             }
@@ -327,81 +324,70 @@ impl Pl011 {
     }
 
     /// 初始化 PL011 UART
-    pub fn init(&self) -> Result<(), SerialError> {
+    fn init(&self) {
         // 禁用 UART
-        self.registers.uartcr.modify(UARTCR::UARTEN::CLEAR);
+        self.registers().uartcr.modify(UARTCR::UARTEN::CLEAR);
 
         // 等待当前传输完成
-        while self.registers.uartfr.is_set(UARTFR::BUSY) {
+        while self.registers().uartfr.is_set(UARTFR::BUSY) {
             core::hint::spin_loop();
         }
 
         // 清除发送 FIFO
-        self.registers.uartlcr_h.modify(UARTLCR_H::FEN::CLEAR);
+        self.registers().uartlcr_h.modify(UARTLCR_H::FEN::CLEAR);
 
         // 启用 FIFO
-        self.registers.uartlcr_h.modify(UARTLCR_H::FEN::SET);
+        self.registers().uartlcr_h.modify(UARTLCR_H::FEN::SET);
 
         // 启用 UART
-        self.registers
+        self.registers()
             .uartcr
             .modify(UARTCR::UARTEN::SET + UARTCR::TXE::SET + UARTCR::RXE::SET);
-
-        Ok(())
     }
 }
 
 impl SerialRegister for Pl011 {
-    fn write_byte(&mut self, byte: u8) -> Result<(), TransferError> {
-        self.registers.uartdr.write(UARTDR::DATA.val(byte as u32));
-        Ok(())
+    fn write_byte(&mut self, byte: u8) {
+        self.registers().uartdr.write(UARTDR::DATA.val(byte as u32));
     }
 
     fn read_byte(&self) -> Result<u8, TransferError> {
-        let data = self.registers.uartdr.get();
-
-        // 检查错误标志
-        if data & 0xFFFFFF00 != 0 {
-            // 清除错误状态
-            self.registers.uartrsr_ecr.set(0xFFFFFFFF);
-
-            // 根据具体错误返回对应的错误类型
-            if data & (1 << 8) != 0 {
-                // Framing Error
-                return Err(TransferError::Framing);
-            }
-            if data & (1 << 9) != 0 {
-                // Parity Error
-                return Err(TransferError::Parity);
-            }
-            if data & (1 << 10) != 0 {
-                // Break Error
-                return Err(TransferError::Break);
-            }
-            if data & (1 << 11) != 0 {
-                // Overrun Error
-                return Err(TransferError::Overrun);
-            }
+        let dr = self.registers().uartdr.extract();
+        let data = dr.read(UARTDR::DATA) as u8;
+        if dr.is_set(UARTDR::FE) {
+            return Err(TransferError::Framing);
         }
 
-        Ok(data as u8)
+        if dr.is_set(UARTDR::PE) {
+            return Err(TransferError::Parity);
+        }
+
+        if dr.is_set(UARTDR::OE) {
+            return Err(TransferError::Overrun(data));
+        }
+
+        if dr.is_set(UARTDR::BE) {
+            return Err(TransferError::Break);
+        }
+
+        Ok(data)
     }
 
-    fn set_config(&self, config: &Config) -> Result<(), SerialError> {
+    fn set_config(&mut self, config: &Config) -> Result<(), ConfigError> {
         use tock_registers::interfaces::Readable;
 
         // 根据ARM文档的建议配置流程：
         // 1. 禁用UART
-        let original_enable = self.registers.uartcr.is_set(UARTCR::UARTEN); // 保存原始使能状态
-        self.registers.uartcr.modify(UARTCR::UARTEN::CLEAR); // 禁用UART
+        let original_enable = self.registers().uartcr.is_set(UARTCR::UARTEN); // 保存原始使能状态
+        self.registers().uartcr.modify(UARTCR::UARTEN::CLEAR); // 禁用UART
 
         // 2. 等待当前字符传输完成
-        while self.registers.uartfr.is_set(UARTFR::BUSY) {
+        while self.registers().uartfr.is_set(UARTFR::BUSY) {
             core::hint::spin_loop();
         }
 
         // 3. 刷新发送FIFO（通过设置FEN=0）
-        self.registers.uartlcr_h.modify(UARTLCR_H::FEN::CLEAR);
+        self.registers().uartlcr_h.modify(UARTLCR_H::FEN::CLEAR);
 
         // 4. 配置各项参数
         if let Some(baudrate) = config.baudrate {
@@ -418,19 +404,19 @@ impl SerialRegister for Pl011 {
         }
 
         // 5. 重新启用FIFO
-        self.registers.uartlcr_h.modify(UARTLCR_H::FEN::SET);
+        self.registers().uartlcr_h.modify(UARTLCR_H::FEN::SET);
 
         // 6. 恢复UART使能状态
         if original_enable {
-            self.registers.uartcr.modify(UARTCR::UARTEN::SET); // 重新启用UART
+            self.registers().uartcr.modify(UARTCR::UARTEN::SET); // 重新启用UART
         }
 
         Ok(())
     }
 
     fn baudrate(&self) -> u32 {
-        let ibrd = self.registers.uartibrd.read(UARTIBRD::BAUD_DIVINT);
-        let fbrd = self.registers.uartfbrd.read(UARTFBRD::BAUD_DIVFRAC);
+        let ibrd = self.registers().uartibrd.read(UARTIBRD::BAUD_DIVINT);
+        let fbrd = self.registers().uartfbrd.read(UARTFBRD::BAUD_DIVFRAC);
 
         // 反向计算波特率
         // Baud rate = FUARTCLK / (16 * (IBRD + FBRD/64))
@@ -443,7 +429,7 @@ impl SerialRegister for Pl011 {
     }
 
     fn data_bits(&self) -> DataBits {
-        let wlen = self.registers.uartlcr_h.read(UARTLCR_H::WLEN);
+        let wlen = self.registers().uartlcr_h.read(UARTLCR_H::WLEN);
 
         match wlen {
             0 => DataBits::Five,
@@ -455,7 +441,7 @@ impl SerialRegister for Pl011 {
     }
 
     fn stop_bits(&self) -> StopBits {
-        if self.registers.uartlcr_h.is_set(UARTLCR_H::STP2) {
+        if self.registers().uartlcr_h.is_set(UARTLCR_H::STP2) {
             StopBits::Two
         } else {
             StopBits::One
@@ -463,18 +449,18 @@ impl SerialRegister for Pl011 {
     }
 
     fn parity(&self) -> Parity {
-        if !self.registers.uartlcr_h.is_set(UARTLCR_H::PEN) {
+        if !self.registers().uartlcr_h.is_set(UARTLCR_H::PEN) {
             Parity::None
-        } else if self.registers.uartlcr_h.is_set(UARTLCR_H::SPS) {
+        } else if self.registers().uartlcr_h.is_set(UARTLCR_H::SPS) {
             // Stick parity
-            if self.registers.uartlcr_h.is_set(UARTLCR_H::EPS) {
+            if self.registers().uartlcr_h.is_set(UARTLCR_H::EPS) {
                 Parity::Space
             } else {
                 Parity::Mark
             }
         } else {
             // Normal parity
-            if self.registers.uartlcr_h.is_set(UARTLCR_H::EPS) {
+            if self.registers().uartlcr_h.is_set(UARTLCR_H::EPS) {
                 Parity::Even
             } else {
                 Parity::Odd
@@ -482,17 +468,16 @@ impl SerialRegister for Pl011 {
         }
     }
 
-    fn open(&self) -> Result<(), SerialError> {
+    fn open(&mut self) {
         self.init()
     }
 
-    fn close(&self) -> Result<(), SerialError> {
+    fn close(&mut self) {
         // 禁用 UART
-        self.registers.uartcr.modify(UARTCR::UARTEN::CLEAR);
-        Ok(())
+        self.registers().uartcr.modify(UARTCR::UARTEN::CLEAR);
     }
 
-    fn enable_interrupts(&self, mask: InterruptMask) {
+    fn enable_interrupts(&mut self, mask: InterruptMask) {
         let mut imsc = 0u32;
 
         if mask.contains(InterruptMask::RX_AVAILABLE) {
@@ -511,7 +496,7 @@ impl SerialRegister for Pl011 {
             imsc |= 1 << 6; // RTIM
         }
 
-        self.registers.uartimsc.set(imsc);
+        self.registers().uartimsc.set(imsc);
     }
 
     fn disable_interrupts(&mut self, mask: InterruptMask) {
@@ -534,14 +519,14 @@ impl SerialRegister for Pl011 {
         }
 
         // 读取当前值并清除相应的中断掩码位
-        let current = self.registers.uartimsc.get();
-        self.registers.uartimsc.set(current & !imsc);
+        let current = self.registers().uartimsc.get();
+        self.registers().uartimsc.set(current & !imsc);
     }
 
     fn clean_interrupt_status(&mut self) -> InterruptMask {
         use tock_registers::interfaces::Readable;
 
-        let mis = self.registers.uartmis.get();
+        let mis = self.registers().uartmis.get();
         let mut mask = InterruptMask::empty();
 
         if mis & (1 << 4) != 0 {
@@ -561,7 +546,7 @@ impl SerialRegister for Pl011 {
         }
 
         // 清除所有中断状态
-        self.registers.uarticr.set(0x7FF); // 清除所有可清除的中断
+        self.registers().uarticr.set(0x7FF); // 清除所有可清除的中断
 
         mask
     }
@@ -570,53 +555,38 @@ impl SerialRegister for Pl011 {
         use tock_registers::interfaces::Readable;
         let mut status = LineStatus::empty();
 
-        let _fr = self.registers.uartfr.get();
-        let dr = self.registers.uartdr.get();
+        let fr = self.registers().uartfr.extract();
 
-        if !self.registers.uartfr.is_set(UARTFR::RXFE) {
+        if !fr.is_set(UARTFR::RXFE) {
             status |= LineStatus::DATA_READY;
         }
-        if dr & (1 << 11) != 0 {
-            status |= LineStatus::OVERRUN_ERROR;
-        }
-        if dr & (1 << 9) != 0 {
-            status |= LineStatus::PARITY_ERROR;
-        }
-        if dr & (1 << 8) != 0 {
-            status |= LineStatus::FRAMING_ERROR;
-        }
-        if dr & (1 << 10) != 0 {
-            status |= LineStatus::BREAK_INTERRUPT;
-        }
-        if !self.registers.uartfr.is_set(UARTFR::TXFF) {
+
+        if !fr.is_set(UARTFR::TXFF) {
             status |= LineStatus::TX_HOLDING_EMPTY;
         }
-        if self.registers.uartfr.is_set(UARTFR::TXFE) {
-            status |= LineStatus::TX_EMPTY;
-        }
-
-        // clean err
-        self.registers.uartrsr_ecr.set(0xFFFFFFFF);
         status
     }
 
     fn read_reg(&self, offset: usize) -> u32 {
-        let addr = self.base + offset;
-        unsafe { core::ptr::read_volatile(addr as *const u32) }
+        let addr = unsafe { self.base.cast::<u8>().add(offset) };
+        unsafe { addr.cast().read_volatile() }
     }
 
-    fn write_reg(&self, offset: usize, value: u32) {
-        let addr = self.base + offset;
-        unsafe { core::ptr::write_volatile(addr as *mut u32, value) };
+    fn write_reg(&mut self, offset: usize, value: u32) {
+        let addr = unsafe { self.base.cast::<u8>().add(offset) };
+        unsafe { addr.cast().write_volatile(value) };
     }
 
     fn get_base(&self) -> usize {
-        self.base
+        self.base.as_ptr() as usize
     }
 
-    fn set_base(&mut self, base: usize) {
-        self.base = base;
-        self.registers = unsafe { &*(base as *const Pl011Registers) };
+    fn set_base(&mut self, base: NonNull<u8>) {
+        self.base = base.cast();
+    }
+
+    fn clock_freq(&self) -> u32 {
+        self.clock_freq
     }
 }
 
@@ -625,9 +595,9 @@ impl Pl011 {
     /// 启用或禁用 FIFO
     pub fn enable_fifo(&self, enable: bool) {
         if enable {
-            self.registers.uartlcr_h.modify(UARTLCR_H::FEN::SET);
+            self.registers().uartlcr_h.modify(UARTLCR_H::FEN::SET);
         } else {
-            self.registers.uartlcr_h.modify(UARTLCR_H::FEN::CLEAR);
+            self.registers().uartlcr_h.modify(UARTLCR_H::FEN::CLEAR);
         }
     }
 
@@ -656,7 +626,7 @@ impl Pl011 {
             _ => 0b100,      // 7/8
         };
 
-        self.registers
+        self.registers()
             .uartifls
             .write(UARTIFLS::RXIFLSEL.val(rx_iflsel) + UARTIFLS::TXIFLSEL.val(tx_iflsel));
     }
