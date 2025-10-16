@@ -8,13 +8,12 @@ extern crate bare_test;
 #[bare_test::tests]
 mod tests {
     use alloc::vec::Vec;
-    use alloc::{format, vec};
     use bare_test::irq::{IrqHandleResult, IrqParam};
     use core::{
         ptr::NonNull,
         sync::atomic::{AtomicBool, AtomicUsize, Ordering},
     };
-    use rdif_serial::{BIrqHandler, BReciever, BSender, Interface as _, TReciever, TSender};
+    use rdif_serial::{BIrqHandler, BReciever, BSender, Interface as _, TransferError};
 
     use super::*;
     use bare_test::{
@@ -48,6 +47,7 @@ mod tests {
     // === 中断测试辅助函数 ===
 
     /// 重置所有中断计数器
+    #[allow(dead_code)]
     fn reset_interrupt_counters() {
         TX_INTERRUPT_COUNT.store(0, Ordering::SeqCst);
         RX_INTERRUPT_COUNT.store(0, Ordering::SeqCst);
@@ -56,6 +56,7 @@ mod tests {
     }
 
     /// 获取当前中断计数
+    #[allow(dead_code)]
     fn get_interrupt_counts() -> (usize, usize, usize) {
         let tx_count = TX_INTERRUPT_COUNT.load(Ordering::SeqCst);
         let rx_count = RX_INTERRUPT_COUNT.load(Ordering::SeqCst);
@@ -64,6 +65,7 @@ mod tests {
     }
 
     /// 打印中断计数状态
+    #[allow(dead_code)]
     fn print_interrupt_counts(context: &str) {
         let (tx_count, rx_count, handler_count) = get_interrupt_counts();
         info!(
@@ -80,19 +82,9 @@ mod tests {
         info!("=== Serial Basic Loopback Test ===");
 
         let mut serial = create_test_serial();
+        serial.enable_loopback();
+
         serial.open().expect("Failed to open Serial");
-
-        // 配置 Serial
-        let config = some_serial::Config::new()
-            .baudrate(115200)
-            .data_bits(DataBits::Eight)
-            .stop_bits(StopBits::One)
-            .parity(Parity::None);
-
-        if let Err(e) = serial.set_config(&config) {
-            info!("Serial config failed: {:?}", e);
-            return;
-        }
 
         // 获取 TX/RX 接口
         let mut tx = match serial.take_tx() {
@@ -120,7 +112,8 @@ mod tests {
         // 测试回环功能
         let test_data = b"Hello";
         info!("Testing loopback with data: {test_data:?}");
-        test_serial_loopback_with_data(&mut serial, &mut tx, &mut rx, test_data);
+        test_serial_loopback_with_data(&mut serial, &mut tx, &mut rx, test_data)
+            .expect("loopback should succeed");
 
         // 清理资源
         drop(tx);
@@ -368,7 +361,7 @@ mod tests {
         tx: &mut BSender,
         rx: &mut BReciever,
         test_data: &[u8],
-    ) -> bool {
+    ) -> Result<(), TransferError> {
         // 确保回环模式启用
         if !serial.is_loopback_enabled() {
             serial.enable_loopback();
@@ -376,53 +369,34 @@ mod tests {
         if !serial.is_loopback_enabled() {
             panic!("✗ Failed to enable loopback mode");
         }
+        let mut rcv_buff = Vec::with_capacity(64);
 
-        // 发送数据
-        let sent_bytes = tx.send(test_data);
-        info!("Sent {} bytes", sent_bytes);
+        // 尽量清空残留数据，避免与本次测试混淆
+        rx.clean_fifo();
+        let mut buff = [0u8; 1];
+        for (i, b) in test_data.iter().enumerate() {
+            // 发送一个字节
+            let sent = tx.send(&[*b]);
+            if sent != 1 {
+                panic!("✗ Failed to send byte {}: sent {}", i, sent);
+            }
 
-        if sent_bytes == 0 && !test_data.is_empty() {
-            info!("✗ Failed to send any data");
-            return false;
-        }
-
-        // 接收数据
-        let mut recv_buf = vec![0u8; test_data.len() + 10];
-        match rx.recive(&mut recv_buf) {
-            Ok(received_bytes) => {
-                info!("Received {} bytes", received_bytes);
-
-                if received_bytes == sent_bytes {
-                    let sent_data = &test_data[..sent_bytes];
-                    let received_data = &recv_buf[..received_bytes];
-
-                    if sent_data == received_data {
-                        info!("✓ Loopback test passed: data matches");
-                        return true;
-                    } else {
-                        info!("✗ Loopback test failed: data mismatch");
-                        info!("  Sent:    {:?}", sent_data);
-                        info!("  Received: {:?}", received_data);
-                    }
-                } else {
-                    info!("✗ Loopback test failed: length mismatch");
-                    info!(
-                        "  Sent: {}, Received: {:?}({})",
-                        sent_bytes,
-                        &recv_buf[..received_bytes],
-                        received_bytes
-                    );
+            // 接收一个字节
+            loop {
+                let n = rx.recive(&mut buff)?;
+                if n == 1 {
+                    rcv_buff.push(buff[0]);
+                    break;
                 }
             }
-            Err(e) => {
-                info!("✗ Loopback test failed: receive error {:?}", e);
-            }
         }
+        assert_eq!(&rcv_buff, test_data);
 
-        false
+        Ok(())
     }
 
     /// 测试 Serial 配置功能
+    #[allow(dead_code)]
     fn test_serial_configuration(serial: &mut some_serial::Serial<some_serial::pl011::Pl011>) {
         info!("Testing Serial configuration...");
 
@@ -467,6 +441,7 @@ mod tests {
     }
 
     /// 测试 Serial 回环控制功能
+    #[allow(dead_code)]
     fn test_serial_loopback_control(serial: &mut some_serial::Serial<some_serial::pl011::Pl011>) {
         info!("Testing Serial loopback control...");
 
@@ -493,6 +468,7 @@ mod tests {
     }
 
     /// 测试 Serial 中断管理功能
+    #[allow(dead_code)]
     fn test_serial_interrupt_management(
         serial: &mut some_serial::Serial<some_serial::pl011::Pl011>,
     ) {
@@ -520,6 +496,7 @@ mod tests {
     }
 
     /// 测试 Serial DriverGeneric 接口
+    #[allow(dead_code)]
     fn test_serial_driver_generic(serial: &mut some_serial::Serial<some_serial::pl011::Pl011>) {
         info!("Testing Serial DriverGeneric interface...");
 
@@ -556,6 +533,7 @@ mod tests {
         }
     }
 
+    #[allow(dead_code)]
     fn detect_uart_devices() {
         let PlatformInfoKind::DeviceTree(fdt) = &global_val().platform_info;
         let fdt = fdt.get();
@@ -629,7 +607,7 @@ mod tests {
                 intc: irq.irq_parent,
                 cfg: irq.cfgs[0].clone(),
             }
-            .register_builder(move |irq| {
+            .register_builder(move |_irq| {
                 // 增加中断处理函数调用计数
                 IRQ_HANDLER_CALL_COUNT.fetch_add(1, Ordering::SeqCst);
 
