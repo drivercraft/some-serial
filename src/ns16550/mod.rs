@@ -92,17 +92,19 @@ impl<T: Kind> Ns16550<T> {
         }
 
         // 保存原始 LCR
-        let original_lcr: LineControlFlags = self.read_flags(UART_LCR);
+        let mut lcr: LineControlFlags = self.read_flags(UART_LCR);
 
         // 设置 DLAB 以访问波特率除数寄存器
-        self.write_flags(UART_LCR, original_lcr | LineControlFlags::DIVISOR_LATCH_ACCESS);
+        lcr.insert(LineControlFlags::DIVISOR_LATCH_ACCESS);
+        self.write_flags(UART_LCR, lcr);
 
         // 设置除数（使用 u8 方法，因为这是原始数据写入）
         self.write_reg_u8(UART_DLL, (divisor & 0xFF) as u8);
         self.write_reg_u8(UART_DLH, ((divisor >> 8) & 0xFF) as u8);
 
-        // 恢复原始 LCR
-        self.write_flags(UART_LCR, original_lcr);
+        // 清除 DLAB 位，恢复正常访问
+        lcr.remove(LineControlFlags::DIVISOR_LATCH_ACCESS);
+        self.write_flags(UART_LCR, lcr);
 
         Ok(())
     }
@@ -116,50 +118,74 @@ impl<T: Kind> Ns16550<T> {
             DataBits::Eight => LineControlFlags::WORD_LENGTH_8,
         };
 
-        let original_lcr: LineControlFlags = self.read_flags(UART_LCR);
-        let new_lcr = (original_lcr & !LineControlFlags::WORD_LENGTH_MASK) | wlen;
-        self.write_flags(UART_LCR, new_lcr);
+        let mut lcr: LineControlFlags = self.read_flags(UART_LCR);
+        // 清除旧的数据位设置，然后设置新的
+        lcr.remove(LineControlFlags::WORD_LENGTH_MASK);
+        lcr.insert(wlen);
+        self.write_flags(UART_LCR, lcr);
 
         Ok(())
     }
 
     /// 设置停止位
     fn set_stop_bits_internal(&mut self, bits: StopBits) -> Result<(), ConfigError> {
-        let original_lcr: LineControlFlags = self.read_flags(UART_LCR);
-        let new_lcr = match bits {
-            StopBits::One => original_lcr & !LineControlFlags::STOP_BITS,
-            StopBits::Two => original_lcr | LineControlFlags::STOP_BITS,
-        };
-        self.write_flags(UART_LCR, new_lcr);
+        let mut lcr: LineControlFlags = self.read_flags(UART_LCR);
+        match bits {
+            StopBits::One => lcr.remove(LineControlFlags::STOP_BITS),
+            StopBits::Two => lcr.insert(LineControlFlags::STOP_BITS),
+        }
+        self.write_flags(UART_LCR, lcr);
         Ok(())
     }
 
     /// 设置奇偶校验
     fn set_parity_internal(&mut self, parity: Parity) -> Result<(), ConfigError> {
-        let original_lcr: LineControlFlags = self.read_flags(UART_LCR);
+        let mut lcr: LineControlFlags = self.read_flags(UART_LCR);
 
-        let new_lcr = match parity {
-            Parity::None => original_lcr & !(LineControlFlags::PARITY_ENABLE | LineControlFlags::EVEN_PARITY | LineControlFlags::STICK_PARITY),
-            Parity::Odd => (original_lcr | LineControlFlags::PARITY_ENABLE) & !(LineControlFlags::EVEN_PARITY | LineControlFlags::STICK_PARITY),
-            Parity::Even => (original_lcr | LineControlFlags::PARITY_ENABLE | LineControlFlags::EVEN_PARITY) & !LineControlFlags::STICK_PARITY,
-            Parity::Mark => original_lcr | LineControlFlags::PARITY_ENABLE | LineControlFlags::STICK_PARITY,
-            Parity::Space => original_lcr | LineControlFlags::PARITY_ENABLE | LineControlFlags::EVEN_PARITY | LineControlFlags::STICK_PARITY,
-        };
+        // 先清除所有校验相关位
+        lcr.remove(
+            LineControlFlags::PARITY_ENABLE
+                | LineControlFlags::EVEN_PARITY
+                | LineControlFlags::STICK_PARITY,
+        );
 
-        self.write_flags(UART_LCR, new_lcr);
+        // 根据校验类型设置相应位
+        match parity {
+            Parity::None => {
+                // 已经清除，无需额外操作
+            }
+            Parity::Odd => {
+                lcr.insert(LineControlFlags::PARITY_ENABLE);
+            }
+            Parity::Even => {
+                lcr.insert(LineControlFlags::PARITY_ENABLE | LineControlFlags::EVEN_PARITY);
+            }
+            Parity::Mark => {
+                lcr.insert(LineControlFlags::PARITY_ENABLE | LineControlFlags::STICK_PARITY);
+            }
+            Parity::Space => {
+                lcr.insert(
+                    LineControlFlags::PARITY_ENABLE
+                        | LineControlFlags::EVEN_PARITY
+                        | LineControlFlags::STICK_PARITY,
+                );
+            }
+        }
+
+        self.write_flags(UART_LCR, lcr);
         Ok(())
     }
 
     /// 启用或禁用 FIFO
     pub fn enable_fifo(&mut self, enable: bool) {
         if enable && self.is_16550_plus() {
-            let fcr_flags = FifoControlFlags::ENABLE_FIFO
-                | FifoControlFlags::CLEAR_RECEIVER_FIFO
-                | FifoControlFlags::CLEAR_TRANSMITTER_FIFO
-                | FifoControlFlags::TRIGGER_1_BYTE;
-            self.write_flags(UART_FCR, fcr_flags);
+            let mut fcr = FifoControlFlags::ENABLE_FIFO;
+            fcr.insert(FifoControlFlags::CLEAR_RECEIVER_FIFO);
+            fcr.insert(FifoControlFlags::CLEAR_TRANSMITTER_FIFO);
+            fcr.insert(FifoControlFlags::TRIGGER_1_BYTE);
+            self.write_flags(UART_FCR, fcr);
         } else {
-            self.write_reg_u8(UART_FCR, 0);
+            self.write_flags(UART_FCR, FifoControlFlags::empty());
         }
     }
 
@@ -176,28 +202,30 @@ impl<T: Kind> Ns16550<T> {
             _ => FifoControlFlags::TRIGGER_14_BYTES,
         };
 
-        // 保留其他 FIFO 设置
-        let current_fcr: FifoControlFlags = self.read_flags(UART_FCR);
-        let new_fcr = (current_fcr & !FifoControlFlags::TRIGGER_LEVEL_MASK) | trigger_value;
-        self.write_flags(UART_FCR, new_fcr);
+        // 读取当前 FCR 设置，清除触发级别位，然后设置新的触发级别
+        let mut fcr: FifoControlFlags = self.read_flags(UART_FCR);
+        fcr.remove(FifoControlFlags::TRIGGER_LEVEL_MASK);
+        fcr.insert(trigger_value);
+        self.write_flags(UART_FCR, fcr);
     }
 
     /// 初始化 UART
     fn init(&mut self) {
-        // 禁用中断
-        self.write_reg_u8(UART_IER, 0);
+        // 禁用所有中断
+        self.write_flags(UART_IER, InterruptEnableFlags::empty());
 
-        // 确保传输器启用
-        let original_mcr: ModemControlFlags = self.read_flags(UART_MCR);
-        let new_mcr = original_mcr | ModemControlFlags::DATA_TERMINAL_READY | ModemControlFlags::REQUEST_TO_SEND;
-        self.write_flags(UART_MCR, new_mcr);
+        // 确保传输器启用（设置 DTR 和 RTS）
+        let mut mcr: ModemControlFlags = self.read_flags(UART_MCR);
+        mcr.insert(ModemControlFlags::DATA_TERMINAL_READY | ModemControlFlags::REQUEST_TO_SEND);
+        self.write_flags(UART_MCR, mcr);
     }
 
     /// 清空接收 FIFO
     pub fn clear_receive_fifo(&mut self) {
         if self.is_16550_plus() {
-            let fcr_flags = FifoControlFlags::ENABLE_FIFO | FifoControlFlags::CLEAR_RECEIVER_FIFO;
-            self.write_flags(UART_FCR, fcr_flags);
+            let mut fcr = FifoControlFlags::ENABLE_FIFO;
+            fcr.insert(FifoControlFlags::CLEAR_RECEIVER_FIFO);
+            self.write_flags(UART_FCR, fcr);
         }
         self.rcv_fifo.clear();
     }
@@ -205,8 +233,9 @@ impl<T: Kind> Ns16550<T> {
     /// 清空发送 FIFO
     pub fn clear_transmit_fifo(&mut self) {
         if self.is_16550_plus() {
-            let fcr_flags = FifoControlFlags::ENABLE_FIFO | FifoControlFlags::CLEAR_TRANSMITTER_FIFO;
-            self.write_flags(UART_FCR, fcr_flags);
+            let mut fcr = FifoControlFlags::ENABLE_FIFO;
+            fcr.insert(FifoControlFlags::CLEAR_TRANSMITTER_FIFO);
+            self.write_flags(UART_FCR, fcr);
         }
     }
 
@@ -224,11 +253,12 @@ impl<T: Kind> Ns16550<T> {
 impl<T: Kind> Register for Ns16550<T> {
     fn write_byte(&mut self, byte: u8) {
         self.write_reg_u8(UART_THR, byte);
+        // 如果启用了发送中断模式，在写入数据后重新启用 THRE 中断
+        // 这样当 THR 的数据被转移到 TSR 后会再次触发中断
         if self.is_tx_empty_int_enabled {
-            // 启用 THRE 中断
-            let ier: InterruptEnableFlags = self.read_flags(UART_IER);
-            let new_ier = ier | InterruptEnableFlags::TRANSMITTER_HOLDING_EMPTY;
-            self.write_flags(UART_IER, new_ier);
+            let mut ier: InterruptEnableFlags = self.read_flags(UART_IER);
+            ier.insert(InterruptEnableFlags::TRANSMITTER_HOLDING_EMPTY);
+            self.write_flags(UART_IER, ier);
         }
     }
 
@@ -331,13 +361,13 @@ impl<T: Kind> Register for Ns16550<T> {
     }
 
     fn close(&mut self) {
-        // 禁用中断
-        self.write_reg_u8(UART_IER, 0);
+        // 禁用所有中断
+        self.write_flags(UART_IER, InterruptEnableFlags::empty());
 
         // 禁用 DTR 和 RTS
-        let original_mcr: ModemControlFlags = self.read_flags(UART_MCR);
-        let new_mcr = original_mcr & !(ModemControlFlags::DATA_TERMINAL_READY | ModemControlFlags::REQUEST_TO_SEND);
-        self.write_flags(UART_MCR, new_mcr);
+        let mut mcr: ModemControlFlags = self.read_flags(UART_MCR);
+        mcr.remove(ModemControlFlags::DATA_TERMINAL_READY | ModemControlFlags::REQUEST_TO_SEND);
+        self.write_flags(UART_MCR, mcr);
     }
 
     fn clean_interrupt_status(&mut self) -> InterruptMask {
@@ -354,25 +384,27 @@ impl<T: Kind> Register for Ns16550<T> {
 
         if interrupt_id == InterruptIdentificationFlags::RECEIVER_LINE_STATUS {
             let lsr: LineStatusFlags = self.read_flags(UART_LSR);
+
+            // 读取 RBR 以清除错误状态（即使有错误也需要读取）
+            let d = self.read_reg_u8(UART_RBR);
+
+            // 按优先级检查错误（从高到低）
             if lsr.contains(LineStatusFlags::OVERRUN_ERROR) {
-                let d = self.read_reg_u8(UART_RBR);
                 self.err = Some(TransferError::Overrun(d));
                 mask |= InterruptMask::RX_AVAILABLE;
-            }
-            if lsr.contains(LineStatusFlags::PARITY_ERROR) {
+            } else if lsr.contains(LineStatusFlags::PARITY_ERROR) {
                 self.err = Some(TransferError::Parity);
                 mask |= InterruptMask::RX_AVAILABLE;
-            }
-            if lsr.contains(LineStatusFlags::FRAMING_ERROR) {
+            } else if lsr.contains(LineStatusFlags::FRAMING_ERROR) {
                 self.err = Some(TransferError::Framing);
                 mask |= InterruptMask::RX_AVAILABLE;
-            }
-            if lsr.contains(LineStatusFlags::BREAK_INTERRUPT) {
+            } else if lsr.contains(LineStatusFlags::BREAK_INTERRUPT) {
                 self.err = Some(TransferError::Break);
                 mask |= InterruptMask::RX_AVAILABLE;
             }
         } else if interrupt_id == InterruptIdentificationFlags::RECEIVED_DATA_AVAILABLE
-               || interrupt_id == InterruptIdentificationFlags::CHARACTER_TIMEOUT {
+            || interrupt_id == InterruptIdentificationFlags::CHARACTER_TIMEOUT
+        {
             // 接收中断/超时中断，读取 RBR 清除
             let d = self.read_reg_u8(UART_RBR);
             mask |= InterruptMask::RX_AVAILABLE;
@@ -380,10 +412,12 @@ impl<T: Kind> Register for Ns16550<T> {
                 self.err = Some(TransferError::Overrun(d));
             }
         } else if interrupt_id == InterruptIdentificationFlags::TRANSMITTER_HOLDING_EMPTY {
-            let ier: InterruptEnableFlags = self.read_flags(UART_IER);
-            // 关闭 THRI 使能位
-            let new_ier = ier & !InterruptEnableFlags::TRANSMITTER_HOLDING_EMPTY;
-            self.write_flags(UART_IER, new_ier);
+            // 发送保持寄存器空中断
+            // 关闭 THRI 使能位，避免持续触发中断
+            // 用户在 write_byte 时会重新启用
+            let mut ier: InterruptEnableFlags = self.read_flags(UART_IER);
+            ier.remove(InterruptEnableFlags::TRANSMITTER_HOLDING_EMPTY);
+            self.write_flags(UART_IER, ier);
 
             mask |= InterruptMask::TX_EMPTY;
         } else if interrupt_id == InterruptIdentificationFlags::MODEM_STATUS {
@@ -429,15 +463,15 @@ impl<T: Kind> Register for Ns16550<T> {
     }
 
     fn enable_loopback(&mut self) {
-        let original_mcr: ModemControlFlags = self.read_flags(UART_MCR);
-        let new_mcr = original_mcr | ModemControlFlags::LOOPBACK_ENABLE;
-        self.write_flags(UART_MCR, new_mcr);
+        let mut mcr: ModemControlFlags = self.read_flags(UART_MCR);
+        mcr.insert(ModemControlFlags::LOOPBACK_ENABLE);
+        self.write_flags(UART_MCR, mcr);
     }
 
     fn disable_loopback(&mut self) {
-        let original_mcr: ModemControlFlags = self.read_flags(UART_MCR);
-        let new_mcr = original_mcr & !ModemControlFlags::LOOPBACK_ENABLE;
-        self.write_flags(UART_MCR, new_mcr);
+        let mut mcr: ModemControlFlags = self.read_flags(UART_MCR);
+        mcr.remove(ModemControlFlags::LOOPBACK_ENABLE);
+        self.write_flags(UART_MCR, mcr);
     }
 
     fn is_loopback_enabled(&self) -> bool {
@@ -446,18 +480,19 @@ impl<T: Kind> Register for Ns16550<T> {
     }
 
     fn set_irq_mask(&mut self, mask: InterruptMask) {
-        let mut ier_flags = InterruptEnableFlags::empty();
+        let mut ier = InterruptEnableFlags::empty();
         self.is_tx_empty_int_enabled = false;
 
         if mask.contains(InterruptMask::RX_AVAILABLE) {
-            ier_flags |= InterruptEnableFlags::RECEIVED_DATA_AVAILABLE | InterruptEnableFlags::RECEIVER_LINE_STATUS;
+            ier.insert(InterruptEnableFlags::RECEIVED_DATA_AVAILABLE);
+            ier.insert(InterruptEnableFlags::RECEIVER_LINE_STATUS);
         }
         if mask.contains(InterruptMask::TX_EMPTY) {
-            ier_flags |= InterruptEnableFlags::TRANSMITTER_HOLDING_EMPTY;
+            ier.insert(InterruptEnableFlags::TRANSMITTER_HOLDING_EMPTY);
             self.is_tx_empty_int_enabled = true;
         }
 
-        self.write_flags(UART_IER, ier_flags);
+        self.write_flags(UART_IER, ier);
     }
 
     fn get_irq_mask(&self) -> InterruptMask {
