@@ -2,9 +2,7 @@
 //!
 //! 仅在 x86_64 架构下编译，使用 x86_64 crate 进行端口 I/O
 
-use rdif_serial::{
-    Config, ConfigError, DataBits, Parity, Register, TransferError, StopBits,
-};
+use rdif_serial::{Config, ConfigError, DataBits, Parity, Register, StopBits, TransferError};
 
 use rdif_serial::{InterruptMask, LineStatus};
 use x86_64::instructions::port::Port;

@@ -18,6 +18,7 @@ pub struct Ns16550Mmio {
     base: NonNull<u8>,
     clock_freq: u32,
     err: Option<TransferError>,
+    is_tx_empty_int_enabled: bool,
 }
 
 unsafe impl Send for Ns16550Mmio {}
@@ -35,6 +36,7 @@ impl Ns16550Mmio {
             clock_freq,
             rcv_fifo: Vec::new(),
             err: None,
+            is_tx_empty_int_enabled: false,
         })
     }
 
@@ -205,21 +207,16 @@ impl Ns16550Mmio {
         // 通过检查 IIR 的 FIFO 位来判断
         (self.read_reg(UART_IIR) & UART_IIR_FIFO_MASK) == UART_IIR_FIFO_ENABLE
     }
-
-    /// 获取中断标识
-    pub fn get_interrupt_id(&self) -> u8 {
-        self.read_reg(UART_IIR) & UART_IIR_INTERRUPT_MASK
-    }
-
-    /// 检查是否有挂起的中断
-    pub fn has_pending_interrupt(&self) -> bool {
-        (self.read_reg(UART_IIR) & UART_IIR_NO_INT) == 0
-    }
 }
 
 impl Register for Ns16550Mmio {
     fn write_byte(&mut self, byte: u8) {
         self.write_reg(UART_THR, byte);
+        if self.is_tx_empty_int_enabled {
+            // 启用 THRE 中断
+            let ier = self.read_reg(UART_IER);
+            self.write_reg(UART_IER, ier | UART_IER_THRI);
+        }
     }
 
     fn read_byte(&mut self) -> Result<u8, TransferError> {
@@ -360,8 +357,10 @@ impl Register for Ns16550Mmio {
                 }
             }
             UART_IIR_THRI => {
-                // 发送保持寄存器空中断，写 THR 清除
-                self.write_reg(UART_THR, 0);
+                let ier = self.read_reg(UART_IER);
+                // 关闭 THRI 使能位
+                self.write_reg(UART_IER, ier & !UART_IER_THRI);
+
                 mask |= InterruptMask::TX_EMPTY;
             }
             UART_IIR_MSI => {
@@ -424,12 +423,14 @@ impl Register for Ns16550Mmio {
 
     fn set_irq_mask(&mut self, mask: InterruptMask) {
         let mut ier = 0;
+        self.is_tx_empty_int_enabled = false;
 
         if mask.contains(InterruptMask::RX_AVAILABLE) {
             ier |= UART_IER_RDI + UART_IER_RLSI;
         }
         if mask.contains(InterruptMask::TX_EMPTY) {
             ier |= UART_IER_THRI;
+            self.is_tx_empty_int_enabled = true;
         }
 
         self.write_reg(UART_IER, ier);
@@ -442,7 +443,7 @@ impl Register for Ns16550Mmio {
         if ier & UART_IER_RDI != 0 {
             mask |= InterruptMask::RX_AVAILABLE;
         }
-        if ier & UART_IER_THRI != 0 {
+        if self.is_tx_empty_int_enabled {
             mask |= InterruptMask::TX_EMPTY;
         }
         // 错误中断暂不映射到 InterruptMask
