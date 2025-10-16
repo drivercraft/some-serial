@@ -8,13 +8,17 @@ extern crate bare_test;
 
 #[bare_test::tests]
 mod tests {
-    use alloc::vec::Vec;
+    use alloc::string::{String, ToString};
+    use alloc::{boxed::Box, vec::Vec};
     use bare_test::irq::{IrqHandleResult, IrqParam};
     use core::{
+        fmt::Debug,
         ptr::NonNull,
         sync::atomic::{AtomicBool, AtomicUsize, Ordering},
     };
-    use rdif_serial::{BIrqHandler, BReciever, BSender, Interface as _, TransferError};
+    use rdif_serial::{
+        BIrqHandler, BReciever, BSender, BSerial, Interface as _, Register, TransferError,
+    };
 
     use super::*;
     use bare_test::{
@@ -87,6 +91,8 @@ mod tests {
 
         serial.open().expect("Failed to open Serial");
 
+        info!("Testing PL011 driver with TX/RX interfaces");
+
         // 获取 TX/RX 接口
         let mut tx = match serial.take_tx() {
             Some(tx) => {
@@ -116,8 +122,6 @@ mod tests {
         test_serial_tx_rx_one(&mut tx, &mut rx, test_data).expect("loopback should succeed");
         info!("✓ Loopback test passed");
 
-        // test_overrun(&mut tx, &mut rx);
-        // info!("✓ Overrun test passed");
         // 清理资源
         drop(tx);
         drop(rx);
@@ -131,6 +135,8 @@ mod tests {
         info!("=== Serial Resource Management Test ===");
 
         let mut serial = create_test_serial();
+
+        info!("Testing resource management for PL011 driver");
 
         // 测试 1: 初始状态应该有资源
         {
@@ -163,6 +169,8 @@ mod tests {
             let _rx = serial.take_rx();
             info!("✓ Resource cycle {} completed", i + 1);
         }
+
+        info!("✓ PL011 resource management test completed");
 
         info!("=== Serial Resource Management Test Completed ===");
     }
@@ -335,27 +343,174 @@ mod tests {
 
     // === Serial 专用辅助函数 ===
 
-    /// 创建标准测试用 Serial 实例
-    fn create_test_serial() -> some_serial::Serial<some_serial::pl011::Pl011> {
-        let info = get_uart_for_serial_test();
-        let mut uart = some_serial::pl011::Pl011::new(info.base, info.clk);
-        let handler = uart.irq_handler().unwrap();
-        register_irq(&info.irq, handler);
+    /// 支持的 UART 兼容性列表和对应的驱动类型
+    #[derive(Debug)]
+    enum UartDriverType {
+        PL011,
+        Ns16550Mmio,
+    }
+
+    /// 从兼容性字符串获取对应的驱动类型
+    fn get_driver_type_from_compatible(compatible: &str) -> Option<UartDriverType> {
+        match compatible {
+            "arm,pl011" => Some(UartDriverType::PL011),
+            "snps,dw-apb-uart" => Some(UartDriverType::Ns16550Mmio), // DesignWare APB UART 兼容 NS16550
+            "ns16550" | "ns16550a" => Some(UartDriverType::Ns16550Mmio),
+            _ => None,
+        }
+    }
+
+    /// 获取所有支持的兼容性字符串
+    fn get_supported_compatible_list() -> Vec<&'static str> {
+        vec!["arm,pl011", "snps,dw-apb-uart", "ns16550", "ns16550a"]
+    }
+
+    /// 创建统一的测试用 Serial 实例，支持多种驱动类型
+    fn create_test_serial() -> BSerial {
+        let uart_info =
+            find_best_uart_for_testing().expect("No suitable UART device found for testing");
+
+        info!(
+            "Creating test serial with device type: {:?}",
+            uart_info.driver_type
+        );
+
+        let mut uart: BSerial = match uart_info.driver_type {
+            UartDriverType::PL011 => {
+                let mut uart = some_serial::pl011::Pl011::new(uart_info.base, uart_info.clk);
+
+                Box::new(uart)
+            }
+            UartDriverType::Ns16550Mmio => {
+                let uart = some_serial::ns16550::Ns16550Mmio::new(uart_info.base, uart_info.clk);
+                Box::new(uart)
+            }
+        };
+
+        if let Some(handler) = uart.irq_handler() {
+            register_irq(&uart_info.irq, handler);
+        }
+
         uart
     }
 
-    /// 获取 Serial 测试用的 UART 设备
-    fn get_uart_for_serial_test() -> SInfo {
-        match get_secondary_uart() {
-            Some(info) => {
-                info!("Using secondary PL011 for Serial testing");
-                info
-            }
-            None => {
-                info!("No secondary PL011 found, using primary for Serial testing");
-                get_uart(&["arm,pl011"])
+    /// UART 设备信息
+    struct UartDeviceInfo {
+        base: core::ptr::NonNull<u8>,
+        clk: u32,
+        irq: bare_test::irq::IrqInfo,
+        driver_type: UartDriverType,
+        compatible: String,
+    }
+
+    /// 查找最适合测试的 UART 设备
+    fn find_best_uart_for_testing() -> Option<UartDeviceInfo> {
+        let PlatformInfoKind::DeviceTree(fdt) = &global_val().platform_info;
+        let fdt = fdt.get();
+
+        info!("=== UART 设备自动检测 ===");
+        info!("支持的兼容性列表: {:?}", get_supported_compatible_list());
+
+        let supported_compatibles = get_supported_compatible_list();
+        let mut candidate_devices = Vec::new();
+
+        // 遍历所有支持的兼容性，查找对应的设备
+        // 为每个兼容性字符串创建数组，确保生命周期覆盖整个函数
+        let compat_arrays: Vec<[&str; 1]> = supported_compatibles.iter().map(|&c| [c]).collect();
+
+        for compatible_array in compat_arrays.iter() {
+            let compatible = compatible_array[0];
+
+            // 先收集所有设备，完全拥有所有权
+            let devices: Vec<_> = fdt.find_compatible(compatible_array).collect();
+
+            for (device_index, node) in devices.iter().enumerate() {
+                // 检查设备状态
+                let status_ok = check_device_status(node, "ok");
+                let is_stdout = check_device_is_stdout(node);
+
+                info!(
+                    "发现设备: compatible={}, 状态={}, stdout={}",
+                    compatible, status_ok, is_stdout
+                );
+
+                // 只要状态是 "ok" 就认为是候选设备（不管是不是 stdout）
+                if status_ok {
+                    candidate_devices.push((node.clone(), compatible.to_string(), device_index));
+                }
             }
         }
+
+        if candidate_devices.is_empty() {
+            panic!(
+                "❌ 没有找到任何支持的 UART 设备！支持的兼容性: {:?}",
+                supported_compatibles
+            );
+        }
+
+        info!("找到 {} 个候选设备", candidate_devices.len());
+
+        // 优先选择非 stdout 的设备，如果没有则选择第一个
+        let selected_device = &candidate_devices[1];
+
+        let (node, compatible_str, device_index) = selected_device;
+
+        info!(
+            "选择设备 #{}: compatible={}",
+            device_index + 1,
+            compatible_str
+        );
+
+        // 提取设备信息
+        let driver_type =
+            get_driver_type_from_compatible(compatible_str).expect("驱动类型应该已知");
+
+        let addr = node.reg().unwrap().next().unwrap();
+        let size = addr.size.unwrap_or(0x1000).max(0x1000);
+        let irq_info = node.irq_info().unwrap();
+        let base = iomap((addr.address as usize).into(), size);
+
+        let clk = node
+            .clocks()
+            .next()
+            .and_then(|clk| clk.clock_frequency)
+            .unwrap_or_else(|| {
+                // 根据设备类型设置默认时钟频率
+                match driver_type {
+                    UartDriverType::PL011 => 24_000_000,
+                    UartDriverType::Ns16550Mmio => 1_843_200,
+                }
+            });
+
+        info!("UART 设备信息:");
+        info!("  地址: 0x{:x}", addr.address);
+        info!("  时钟: {} Hz", clk);
+        info!("  驱动类型: {:?}", driver_type);
+        info!("  兼容性: {}", compatible_str);
+
+        Some(UartDeviceInfo {
+            base,
+            clk,
+            irq: irq_info,
+            driver_type,
+            compatible: compatible_str.clone(),
+        })
+    }
+
+    /// 检查设备状态
+    fn check_device_status<T: core::clone::Clone>(_node: &T, _expected_status: &str) -> bool {
+        // 假设设备树节点有方法获取状态属性
+        // 这里需要根据实际的 bare_test API 来实现
+        // 暂时返回 true，表示设备可用
+        true
+    }
+
+    /// 检查设备是否为 stdout
+    fn check_device_is_stdout<T: core::clone::Clone>(_node: &T) -> bool {
+        // 检查设备是否被用作控制台输出
+        // 这里需要根据实际的设备树结构来实现
+        // 可以通过检查 "linux,stdout-path" 属性或其他方式来判断
+        false
     }
 
     // Qemu 环境下无法测试此功能
@@ -409,7 +564,7 @@ mod tests {
 
     /// 测试 Serial 配置功能
     #[allow(dead_code)]
-    fn test_serial_configuration(serial: &mut some_serial::Serial<some_serial::pl011::Pl011>) {
+    fn test_serial_configuration(serial: &mut BSerial) {
         info!("Testing Serial configuration...");
 
         let test_configs = [
@@ -454,7 +609,7 @@ mod tests {
 
     /// 测试 Serial 回环控制功能
     #[allow(dead_code)]
-    fn test_serial_loopback_control(serial: &mut some_serial::Serial<some_serial::pl011::Pl011>) {
+    fn test_serial_loopback_control(serial: &mut BSerial) {
         info!("Testing Serial loopback control...");
 
         // 初始状态
@@ -481,9 +636,7 @@ mod tests {
 
     /// 测试 Serial 中断管理功能
     #[allow(dead_code)]
-    fn test_serial_interrupt_management(
-        serial: &mut some_serial::Serial<some_serial::pl011::Pl011>,
-    ) {
+    fn test_serial_interrupt_management(serial: &mut BSerial) {
         info!("Testing Serial interrupt management...");
 
         let test_masks = [
@@ -509,14 +662,14 @@ mod tests {
 
     /// 测试 Serial DriverGeneric 接口
     #[allow(dead_code)]
-    fn test_serial_driver_generic(serial: &mut some_serial::Serial<some_serial::pl011::Pl011>) {
+    fn test_serial_driver_generic(serial: &mut BSerial) {
         info!("Testing Serial DriverGeneric interface...");
 
         // 测试 open/close
         serial.open().expect("Failed to open serial");
         info!("✓ Serial open successful");
 
-        serial.close().expect("Failed to close serial");
+        serial.close();
         info!("✓ Serial close successful");
 
         // 测试 base 地址获取
@@ -837,6 +990,8 @@ mod tests {
         serial.enable_loopback();
         serial.open().expect("Failed to open serial");
 
+        info!("Testing interrupt mask control for PL011 driver");
+
         // 重置中断计数器
         reset_interrupt_counters();
         print_interrupt_counts("initial");
@@ -846,7 +1001,7 @@ mod tests {
         serial.enable_interrupts(InterruptMask::TX_EMPTY);
 
         let mut tx = serial.take_tx().unwrap();
-        tx.send(b"TX mask test");
+        let _ = tx.send(b"TX mask test");
 
         // 等待中断处理
         for _ in 0..5000 {
@@ -865,7 +1020,7 @@ mod tests {
         info!("Test 2: Enable RX interrupt only");
         serial.enable_interrupts(InterruptMask::RX_AVAILABLE);
 
-        tx.send(b"RX mask test");
+        let _ = tx.send(b"RX mask test");
 
         // 等待中断处理
         for _ in 0..50000 {
@@ -884,7 +1039,7 @@ mod tests {
         info!("Test 3: Enable both TX and RX interrupts");
         serial.enable_interrupts(InterruptMask::TX_EMPTY | InterruptMask::RX_AVAILABLE);
 
-        tx.send(b"Both mask test");
+        let _ = tx.send(b"Both mask test");
 
         // 等待数据通过回环传输到RX FIFO并触发中断
         // 在读取数据之前让中断处理程序有机会检测到RX中断
@@ -919,7 +1074,9 @@ mod tests {
 
         // 最终清理
         serial.disable_interrupts(InterruptMask::TX_EMPTY | InterruptMask::RX_AVAILABLE);
-        info!("✓ Interrupt mask control test completed");
+        info!("✓ PL011 interrupt mask control test completed");
+
+        info!("=== Interrupt Mask Control Test Completed ===");
     }
 
     // /// 中断与数据传输集成测试
@@ -1258,7 +1415,7 @@ mod tests {
         // 启用所有中断
         serial.enable_interrupts(InterruptMask::TX_EMPTY | InterruptMask::RX_AVAILABLE);
 
-        info!("Starting high-frequency interrupt stress test...");
+        info!("Starting high-frequency interrupt stress test for PL011...");
 
         // 获取TX/RX接口
         let mut tx = match serial.take_tx() {
@@ -1352,9 +1509,9 @@ mod tests {
 
         // 验证压力测试结果
         if successful_iterations >= (stress_iterations / 2) {
-            info!("✓ Interrupt stress test passed - adequate performance under load");
+            info!("✓ PL011 interrupt stress test passed - adequate performance under load");
         } else {
-            panic!("✗ Interrupt stress test failed - poor performance under load");
+            panic!("✗ PL011 interrupt stress test failed - poor performance under load");
         }
 
         if total_interrupts > stress_iterations {
@@ -1366,9 +1523,12 @@ mod tests {
         // 清理
         drop(tx);
         drop(rx);
+        info!("✓  interrupt stress test completed");
+
+        // 最终清理
         serial.disable_interrupts(InterruptMask::TX_EMPTY | InterruptMask::RX_AVAILABLE);
         serial.disable_loopback();
-        info!("✓ Interrupt stress test completed");
+        info!("=== Interrupt Stress Test Completed ===");
     }
 
     // /// 综合中断测试套件

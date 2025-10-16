@@ -17,7 +17,8 @@ dma-api = {version = "0.5", features = ["alloc"]}
 log = "0.4"
 mbarrier = "0.1"
 rdif-base = {version = "0.7"}
-rdif-serial = {version = "0.5", path = "/home/zhourui/opensource/rdrive/interface/rdif-serial"}
+# rdif-serial = {version = "0.5", path = "/home/zhourui/opensource/rdrive/interface/rdif-serial"}
+rdif-serial = {version = "0.5"}
 thiserror = {version = "2.0", default-features = false}
 tock-registers = "0.10"
 heapless = "0.9"

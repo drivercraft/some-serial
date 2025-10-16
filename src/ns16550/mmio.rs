@@ -5,7 +5,9 @@
 use crate::ns16550::registers::*;
 use core::ptr::NonNull;
 use heapless::Vec;
-use rdif_serial::{Config, ConfigError, DataBits, Parity, Register, StopBits, TransferError};
+use rdif_serial::{
+    Config, ConfigError, DataBits, Parity, Register, Serial, StopBits, TransferError,
+};
 use rdif_serial::{InterruptMask, LineStatus};
 
 /// NS16550 MMIO 版本驱动
@@ -27,13 +29,13 @@ impl Ns16550Mmio {
     /// # Arguments
     /// * `base` - MMIO 基地址
     /// * `clock_freq` - 输入时钟频率 (Hz)
-    pub fn new(base: NonNull<u8>, clock_freq: u32) -> Self {
-        Self {
+    pub fn new(base: NonNull<u8>, clock_freq: u32) -> Serial<Self> {
+        Serial::new(Self {
             base,
             clock_freq,
             rcv_fifo: Vec::new(),
             err: None,
-        }
+        })
     }
 
     /// 读取寄存器
