@@ -2067,6 +2067,7 @@ dependencies = [
  "mbarrier",
  "rdif-base 0.7.0 (registry+https://github.com/rust-lang/crates.io-index)",
  "rdif-serial",
+ "spin 0.10.0",
  "thiserror 2.0.17",
  "tock-registers 0.10.0",
  "x86_64",

@@ -7,10 +7,11 @@ extern crate bare_test;
 
 #[bare_test::tests]
 mod tests {
-    use alloc::vec;
     use alloc::vec::Vec;
-    use core::ptr::NonNull;
-    use rdif_serial::{Interface as _, TReciever, TSender};
+    use alloc::{boxed::Box, vec};
+    use bare_test::irq::{IrqHandleResult, IrqParam};
+    use core::{ptr::NonNull, sync::atomic::AtomicBool};
+    use rdif_serial::{BIrqHandler, Interface as _, TIrqHandler, TReciever, TSender};
 
     use super::*;
     use bare_test::{
@@ -19,7 +20,7 @@ mod tests {
         irq::IrqInfo,
         mem::iomap,
     };
-    use log::info;
+    use log::{debug, info};
     use some_serial::{DataBits, InterruptMask, Parity, StopBits};
 
     #[derive(Debug)]
@@ -298,7 +299,10 @@ mod tests {
     /// 创建标准测试用 Serial 实例
     fn create_test_serial() -> some_serial::Serial<some_serial::pl011::Pl011> {
         let info = get_uart_for_serial_test();
-        some_serial::pl011::Pl011::new(info.base, info.clk)
+        let mut uart = some_serial::pl011::Pl011::new(info.base, info.clk);
+        let handler = uart.irq_handler().unwrap();
+        register_irq(&info.irq, handler);
+        uart
     }
 
     /// 获取 Serial 测试用的 UART 设备
@@ -556,6 +560,33 @@ mod tests {
                 pl011_devices.len()
             );
             None
+        }
+    }
+
+    fn register_irq(irq: &IrqInfo, handler: BIrqHandler) {
+        static IRQ_REGISTED: AtomicBool = AtomicBool::new(false);
+        if IRQ_REGISTED
+            .compare_exchange(
+                false,
+                true,
+                core::sync::atomic::Ordering::SeqCst,
+                core::sync::atomic::Ordering::SeqCst,
+            )
+            .is_ok()
+        {
+            IrqParam {
+                intc: irq.irq_parent,
+                cfg: irq.cfgs[0].clone(),
+            }
+            .register_builder(move |irq| {
+                let status = handler.clean_interrupt_status();
+
+                IrqHandleResult::Handled
+            })
+            .register();
+            info!("✓ IRQ registered: {:?}", irq);
+        } else {
+            debug!("✓ IRQ already registered, skipping");
         }
     }
 }
