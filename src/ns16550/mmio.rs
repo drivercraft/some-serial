@@ -42,7 +42,7 @@ impl Ns16550Mmio {
     #[inline]
     fn read_reg(&self, offset: u8) -> u8 {
         unsafe {
-            let addr = self.base.as_ptr().add(offset as usize);
+            let addr = self.base.as_ptr().add((offset as usize) * 4);
             core::ptr::read_volatile(addr)
         }
     }
@@ -51,7 +51,7 @@ impl Ns16550Mmio {
     #[inline]
     fn write_reg(&mut self, offset: u8, value: u8) {
         unsafe {
-            let addr = self.base.as_ptr().add(offset as usize);
+            let addr = self.base.as_ptr().add((offset as usize) * 4);
             core::ptr::write_volatile(addr, value);
         }
     }
