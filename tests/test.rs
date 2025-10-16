@@ -834,6 +834,7 @@ mod tests {
         info!("=== Interrupt Mask Control Test ===");
 
         let mut serial = create_test_serial();
+        serial.enable_loopback();
         serial.open().expect("Failed to open serial");
 
         // 重置中断计数器
@@ -844,8 +845,6 @@ mod tests {
         info!("Test 1: Enable TX interrupt only");
         serial.enable_interrupts(InterruptMask::TX_EMPTY);
 
-        // 启用回环并发送数据
-        serial.enable_loopback();
         let mut tx = serial.take_tx().unwrap();
         tx.send(b"TX mask test");
 
@@ -857,29 +856,19 @@ mod tests {
         let (tx_count1, rx_count1, _) = get_interrupt_counts();
         info!("After TX-only: TX={}, RX={}", tx_count1, rx_count1);
 
-        // 清理
-        drop(tx);
         serial.disable_interrupts(InterruptMask::TX_EMPTY | InterruptMask::RX_AVAILABLE);
         reset_interrupt_counters();
+        let mut rx = serial.take_rx().unwrap();
+        rx.clean_fifo();
 
         // 测试2：仅启用RX中断
         info!("Test 2: Enable RX interrupt only");
         serial.enable_interrupts(InterruptMask::RX_AVAILABLE);
 
-        let mut tx = serial.take_tx().unwrap();
-        let mut rx = serial.take_rx().unwrap();
         tx.send(b"RX mask test");
 
         // 等待中断处理
-        for _ in 0..5000 {
-            core::hint::spin_loop();
-        }
-
-        // 尝试接收数据
-        let mut recv_buf = vec![0u8; 20];
-        let _ = rx.recive(&mut recv_buf);
-
-        for _ in 0..5000 {
+        for _ in 0..50000 {
             core::hint::spin_loop();
         }
 
@@ -887,27 +876,22 @@ mod tests {
         info!("After RX-only: TX={}, RX={}", tx_count2, rx_count2);
 
         // 清理
-        drop(tx);
-        drop(rx);
         serial.disable_interrupts(InterruptMask::TX_EMPTY | InterruptMask::RX_AVAILABLE);
+        rx.clean_fifo();
         reset_interrupt_counters();
 
         // 测试3：启用TX和RX中断
         info!("Test 3: Enable both TX and RX interrupts");
         serial.enable_interrupts(InterruptMask::TX_EMPTY | InterruptMask::RX_AVAILABLE);
 
-        let mut tx = serial.take_tx().unwrap();
-        let mut rx = serial.take_rx().unwrap();
         tx.send(b"Both mask test");
 
-        for _ in 0..5000 {
-            core::hint::spin_loop();
-        }
-
-        let mut recv_buf = vec![0u8; 20];
-        let _ = rx.recive(&mut recv_buf);
-
-        for _ in 0..5000 {
+        // 等待数据通过回环传输到RX FIFO并触发中断
+        // 在读取数据之前让中断处理程序有机会检测到RX中断
+        for i in 0..8000 {
+            if i % 2000 == 0 {
+                info!("Waiting for interrupts... {}", i);
+            }
             core::hint::spin_loop();
         }
 
@@ -935,7 +919,6 @@ mod tests {
 
         // 最终清理
         serial.disable_interrupts(InterruptMask::TX_EMPTY | InterruptMask::RX_AVAILABLE);
-        serial.disable_loopback();
         info!("✓ Interrupt mask control test completed");
     }
 

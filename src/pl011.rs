@@ -88,63 +88,18 @@ register_bitfields! [
     ],
 
     /// Interrupt Mask Set/Clear Register
-    UARTIMSC [
-        RIMIM OFFSET(0) NUMBITS(1) [],
-        CTSMIM OFFSET(1) NUMBITS(1) [],
-        DCDMIM OFFSET(2) NUMBITS(1) [],
-        DSRMIM OFFSET(3) NUMBITS(1) [],
-        RXIM OFFSET(4) NUMBITS(1) [],
-        TXIM OFFSET(5) NUMBITS(1) [],
-        RTIM OFFSET(6) NUMBITS(1) [],
-        FEIM OFFSET(7) NUMBITS(1) [],
-        PEIM OFFSET(8) NUMBITS(1) [],
-        BEIM OFFSET(9) NUMBITS(1) [],
-        OEIM OFFSET(10) NUMBITS(1) []
-    ],
-
-    /// Raw Interrupt Status Register
-    UARTRIS [
-        RIRMIS OFFSET(0) NUMBITS(1) [],
-        CTSRMIS OFFSET(1) NUMBITS(1) [],
-        DCDRMIS OFFSET(2) NUMBITS(1) [],
-        DSRRMIS OFFSET(3) NUMBITS(1) [],
-        RXRIS OFFSET(4) NUMBITS(1) [],
-        TXRIS OFFSET(5) NUMBITS(1) [],
-        RTRIS OFFSET(6) NUMBITS(1) [],
-        FERIS OFFSET(7) NUMBITS(1) [],
-        PERIS OFFSET(8) NUMBITS(1) [],
-        BERIS OFFSET(9) NUMBITS(1) [],
-        OERIS OFFSET(10) NUMBITS(1) []
-    ],
-
-    /// Masked Interrupt Status Register
-    UARTMIS [
-        RIMMIS OFFSET(0) NUMBITS(1) [],
-        CTSMIS OFFSET(1) NUMBITS(1) [],
-        DCDMIS OFFSET(2) NUMBITS(1) [],
-        DSRMIS OFFSET(3) NUMBITS(1) [],
-        RXMIS OFFSET(4) NUMBITS(1) [],
-        TXMIS OFFSET(5) NUMBITS(1) [],
-        RTMIS OFFSET(6) NUMBITS(1) [],
-        FEMIS OFFSET(7) NUMBITS(1) [],
-        PEMIS OFFSET(8) NUMBITS(1) [],
-        BEMIS OFFSET(9) NUMBITS(1) [],
-        OEMIS OFFSET(10) NUMBITS(1) []
-    ],
-
-    /// Interrupt Clear Register
-    UARTICR [
-        RIMIC OFFSET(0) NUMBITS(1) [],
-        CTSMIC OFFSET(1) NUMBITS(1) [],
-        DCDMIC OFFSET(2) NUMBITS(1) [],
-        DSRMIC OFFSET(3) NUMBITS(1) [],
-        RXIC OFFSET(4) NUMBITS(1) [],
-        TXIC OFFSET(5) NUMBITS(1) [],
-        RTIC OFFSET(6) NUMBITS(1) [],
-        FEIC OFFSET(7) NUMBITS(1) [],
-        PEIC OFFSET(8) NUMBITS(1) [],
-        BEIC OFFSET(9) NUMBITS(1) [],
-        OEIC OFFSET(10) NUMBITS(1) []
+    UARTIS [
+        RIM OFFSET(0) NUMBITS(1) [],
+        CTSM OFFSET(1) NUMBITS(1) [],
+        DCDM OFFSET(2) NUMBITS(1) [],
+        DSRM OFFSET(3) NUMBITS(1) [],
+        RX OFFSET(4) NUMBITS(1) [],
+        TX OFFSET(5) NUMBITS(1) [],
+        RT OFFSET(6) NUMBITS(1) [],
+        FE OFFSET(7) NUMBITS(1) [],
+        PE OFFSET(8) NUMBITS(1) [],
+        BE OFFSET(9) NUMBITS(1) [],
+        OE OFFSET(10) NUMBITS(1) []
     ],
 
     /// DMA Control Register
@@ -157,23 +112,23 @@ register_bitfields! [
 
 register_structs! {
     pub Pl011Registers {
-        (0x000 => uartdr: ReadWrite<u32, UARTDR::Register>),
-        (0x004 => uartrsr_ecr: ReadWrite<u32, UARTRSR_ECR::Register>),
-        (0x008 => _reserved1),
-        (0x018 => uartfr: ReadOnly<u32, UARTFR::Register>),
-        (0x01c => _reserved2),
-        (0x020 => uartilpr: ReadWrite<u32>),
-        (0x024 => uartibrd: ReadWrite<u32, UARTIBRD::Register>),
-        (0x028 => uartfbrd: ReadWrite<u32, UARTFBRD::Register>),
-        (0x02c => uartlcr_h: ReadWrite<u32, UARTLCR_H::Register>),
-        (0x030 => uartcr: ReadWrite<u32, UARTCR::Register>),
-        (0x034 => uartifls: ReadWrite<u32, UARTIFLS::Register>),
-        (0x038 => uartimsc: ReadWrite<u32, UARTIMSC::Register>),
-        (0x03c => uartris: ReadOnly<u32, UARTRIS::Register>),
-        (0x040 => uartmis: ReadOnly<u32, UARTMIS::Register>),
-        (0x044 => uarticr: WriteOnly<u32, UARTICR::Register>),
-        (0x048 => uartdmacr: ReadWrite<u32, UARTDMACR::Register>),
-        (0x04c => _reserved3),
+        (0x000 => uartdr: ReadWrite<u32, UARTDR::Register>),        // 数据寄存器（收发数据/错误标志）
+        (0x004 => uartrsr_ecr: ReadWrite<u32, UARTRSR_ECR::Register>), // 接收状态/错误清除寄存器
+        (0x008 => _reserved1),                                      // 保留
+        (0x018 => uartfr: ReadOnly<u32, UARTFR::Register>),         // 标志寄存器（状态标志，如忙/空/满等）
+        (0x01c => _reserved2),                                      // 保留
+        (0x020 => uartilpr: ReadWrite<u32>),                        // 红外低功耗波特率寄存器（很少用）
+        (0x024 => uartibrd: ReadWrite<u32, UARTIBRD::Register>),    // 整数波特率分频寄存器
+        (0x028 => uartfbrd: ReadWrite<u32, UARTFBRD::Register>),    // 小数波特率分频寄存器
+        (0x02c => uartlcr_h: ReadWrite<u32, UARTLCR_H::Register>),  // 线路控制寄存器（数据位、停止位、校验等）
+        (0x030 => uartcr: ReadWrite<u32, UARTCR::Register>),        // 控制寄存器（UART使能、收发使能等）
+        (0x034 => uartifls: ReadWrite<u32, UARTIFLS::Register>),    // FIFO中断触发级别选择寄存器
+        (0x038 => uartimsc: ReadWrite<u32, UARTIS::Register>),      // 中断屏蔽设置/清除寄存器
+        (0x03c => uartris: ReadOnly<u32, UARTIS::Register>),        // 原始中断状态寄存器
+        (0x040 => uartmis: ReadOnly<u32, UARTIS::Register>),        // 屏蔽后的中断状态寄存器
+        (0x044 => uarticr: WriteOnly<u32, UARTIS::Register>),       // 中断清除寄存器
+        (0x048 => uartdmacr: ReadWrite<u32, UARTDMACR::Register>),  // DMA控制寄存器
+        (0x04c => _reserved3),                                      // 保留
         (0x1000 => @END),
     }
 }
@@ -346,6 +301,17 @@ impl Pl011 {
         // 启用 FIFO
         self.registers().uartlcr_h.modify(UARTLCR_H::FEN::SET);
 
+        // 调试信息：输出 FIFO 配置
+        #[cfg(debug_assertions)]
+        {
+            let ifls = self.registers().uartifls.get();
+            let lcr_h = self.registers().uartlcr_h.get();
+            log::debug!("UART IFLS: 0x{:02x}, LCR_H: 0x{:02x}", ifls, lcr_h);
+            log::debug!("  FIFO enabled: {}", lcr_h & (1 << 4) != 0);
+            log::debug!("  RX trigger level: 1/8");
+            log::debug!("  TX trigger level: 1/2");
+        }
+        self.registers().uartimsc.set(0); // 禁用所有中断
         // 启用 UART
         self.registers()
             .uartcr
@@ -361,6 +327,7 @@ impl Register for Pl011 {
     fn read_byte(&self) -> Result<u8, TransferError> {
         let dr = self.registers().uartdr.extract();
         let data = dr.read(UARTDR::DATA) as u8;
+
         if dr.is_set(UARTDR::FE) {
             return Err(TransferError::Framing);
         }
@@ -484,76 +451,18 @@ impl Register for Pl011 {
         self.registers().uartcr.modify(UARTCR::UARTEN::CLEAR);
     }
 
-    fn enable_interrupts(&mut self, mask: InterruptMask) {
-        let mut imsc = 0u32;
-
-        if mask.contains(InterruptMask::RX_AVAILABLE) {
-            imsc |= 1 << 4; // RXIM
-        }
-        if mask.contains(InterruptMask::TX_EMPTY) {
-            imsc |= 1 << 5; // TXIM
-        }
-        // if mask.contains(InterruptMask::RX_LINE_STATUS) {
-        //     imsc |= (1 << 7) | (1 << 8) | (1 << 9) | (1 << 10); // FEIM, PEIM, BEIM, OEIM
-        // }
-        // if mask.contains(InterruptMask::MODEM_STATUS) {
-        //     imsc |= (1 << 0) | (1 << 1) | (1 << 2) | (1 << 3); // RIMIM, CTSMIM, DCDMIM, DSRMIM
-        // }
-        // if mask.contains(InterruptMask::CHARACTER_TIMEOUT) {
-        //     imsc |= 1 << 6; // RTIM
-        // }
-
-        self.registers().uartimsc.set(imsc);
-    }
-
-    fn disable_interrupts(&mut self, mask: InterruptMask) {
-        let mut imsc = 0u32;
-
-        if mask.contains(InterruptMask::RX_AVAILABLE) {
-            imsc |= 1 << 4; // RXIM
-        }
-        if mask.contains(InterruptMask::TX_EMPTY) {
-            imsc |= 1 << 5; // TXIM
-        }
-        // if mask.contains(InterruptMask::RX_LINE_STATUS) {
-        //     imsc |= (1 << 7) | (1 << 8) | (1 << 9) | (1 << 10); // FEIM, PEIM, BEIM, OEIM
-        // }
-        // if mask.contains(InterruptMask::MODEM_STATUS) {
-        //     imsc |= (1 << 0) | (1 << 1) | (1 << 2) | (1 << 3); // RIMIM, CTSMIM, DCDMIM, DSRMIM
-        // }
-        // if mask.contains(InterruptMask::CHARACTER_TIMEOUT) {
-        //     imsc |= 1 << 6; // RTIM
-        // }
-
-        // 读取当前值并清除相应的中断掩码位
-        let current = self.registers().uartimsc.get();
-        self.registers().uartimsc.set(current & !imsc);
-    }
-
     fn clean_interrupt_status(&mut self) -> InterruptMask {
-        use tock_registers::interfaces::Readable;
-
-        let mis = self.registers().uartmis.get();
+        let mis = self.registers().uartmis.extract();
         let mut mask = InterruptMask::empty();
 
-        if mis & (1 << 4) != 0 {
+        if mis.is_set(UARTIS::RX) {
             mask |= InterruptMask::RX_AVAILABLE;
         }
-        if mis & (1 << 5) != 0 {
+        if mis.is_set(UARTIS::TX) {
             mask |= InterruptMask::TX_EMPTY;
         }
-        // if mis & ((1 << 7) | (1 << 8) | (1 << 9) | (1 << 10)) != 0 {
-        //     mask |= InterruptMask::RX_LINE_STATUS;
-        // }
-        // if mis & ((1 << 0) | (1 << 1) | (1 << 2) | (1 << 3)) != 0 {
-        //     mask |= InterruptMask::MODEM_STATUS;
-        // }
-        // if mis & (1 << 6) != 0 {
-        //     mask |= InterruptMask::CHARACTER_TIMEOUT;
-        // }
 
-        // 清除所有中断状态
-        self.registers().uarticr.set(0x7FF); // 清除所有可清除的中断
+        self.registers().uarticr.set(mis.get());
 
         mask
     }
@@ -571,6 +480,7 @@ impl Register for Pl011 {
         if !fr.is_set(UARTFR::TXFF) {
             status |= LineStatus::TX_HOLDING_EMPTY;
         }
+
         status
     }
 
@@ -606,6 +516,32 @@ impl Register for Pl011 {
 
     fn is_loopback_enabled(&self) -> bool {
         self.registers().uartcr.is_set(UARTCR::LBE)
+    }
+
+    fn set_irq_mask(&mut self, mask: InterruptMask) {
+        let mut imsc = 0;
+        if mask.contains(InterruptMask::RX_AVAILABLE) {
+            imsc += UARTIS::RX::SET.value;
+        }
+        if mask.contains(InterruptMask::TX_EMPTY) {
+            imsc += UARTIS::TX::SET.value;
+        }
+
+        self.registers().uartimsc.set(imsc);
+    }
+
+    fn get_irq_mask(&self) -> InterruptMask {
+        let imsc = self.registers().uartimsc.extract();
+        let mut mask = InterruptMask::empty();
+
+        if imsc.is_set(UARTIS::RX) {
+            mask |= InterruptMask::RX_AVAILABLE;
+        }
+        if imsc.is_set(UARTIS::TX) {
+            mask |= InterruptMask::TX_EMPTY;
+        }
+
+        mask
     }
 }
 
