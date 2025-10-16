@@ -23,8 +23,8 @@ thiserror = {version = "2.0", default-features = false}
 tock-registers = "0.10"
 heapless = "0.9"
 
-[target.'cfg(target_arch = "x86_64")'.dependencies]
-x86_64 = "0.15"
+[target.'cfg(any(target_arch = "x86", target_arch = "x86_64"))'.dependencies]
+x86 = "0.52"
 
 [target.'cfg(target_os = "none")'.dev-dependencies]
 bare-test = "0.7"

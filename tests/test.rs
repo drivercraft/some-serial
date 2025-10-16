@@ -335,7 +335,7 @@ mod tests {
                 Box::new(uart)
             }
             UartDriverType::Ns16550Mmio => {
-                let uart = some_serial::ns16550::Ns16550Mmio::new(uart_info.base, uart_info.clk);
+                let uart = some_serial::ns16550::Ns16550::new_mmio(uart_info.base, uart_info.clk);
                 Box::new(uart)
             }
         };
