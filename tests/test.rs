@@ -18,10 +18,10 @@ mod tests {
 
     use super::*;
     use bare_test::{
-        GetIrqConfig,
-        globals::{PlatformInfoKind, global_val},
+        globals::{global_val, PlatformInfoKind},
         irq::IrqInfo,
         mem::iomap,
+        GetIrqConfig,
     };
     use log::{debug, info};
     use some_serial::{DataBits, InterruptMask, Parity, StopBits};

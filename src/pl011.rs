@@ -312,7 +312,7 @@ impl Pl011 {
             log::debug!("  TX trigger level: 1/2");
         }
         self.registers().uartimsc.set(0); // 禁用所有中断
-        // 启用 UART
+                                          // 启用 UART
         self.registers()
             .uartcr
             .modify(UARTCR::UARTEN::SET + UARTCR::TXE::SET + UARTCR::RXE::SET);
