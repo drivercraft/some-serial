@@ -162,7 +162,7 @@ fn create_serial_for_platform() -> Box<dyn Serial> {
         ))
     }
 
-    #[cfg(target_arch = "x86_64")]
+     
     {
         // x86_64 测试环境
         Box::new(create_test_uart())

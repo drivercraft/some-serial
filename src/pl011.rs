@@ -1,7 +1,7 @@
 use core::ptr::NonNull;
 
 use crate::Register;
-use rdif_serial::{RegisterTransferError as TransferError, Serial, SerialRaw};
+use rdif_serial::{Serial, TransferError};
 use tock_registers::{interfaces::*, register_bitfields, register_structs, registers::*};
 
 use crate::{Config, ConfigError, DataBits, InterruptMask, LineStatus, Parity, StopBits};
@@ -151,22 +151,10 @@ impl Pl011 {
     ///
     /// # Arguments
     /// * `base` - UART 寄存器基地址
-    pub fn new_raw_no_clock(base: NonNull<u8>) -> SerialRaw<Self> {
+    pub fn new_no_clock(base: NonNull<u8>) -> Serial<Self> {
         // 自动检测时钟频率或使用合理的默认值
         let clock_freq = Self::detect_clock_frequency(base.as_ptr() as usize);
-        Self::new_raw(base, clock_freq)
-    }
-
-    /// 创建新的 PL011 实例（指定时钟频率）
-    ///
-    /// # Arguments
-    /// * `base` - UART 寄存器基地址
-    /// * `clock_freq` - UART 时钟频率 (Hz)
-    pub fn new_raw(base: NonNull<u8>, clock_freq: u32) -> SerialRaw<Self> {
-        SerialRaw::new(Self {
-            base: base.cast(),
-            clock_freq,
-        })
+        Self::new(base, clock_freq)
     }
 
     pub fn new(base: NonNull<u8>, clock_freq: u32) -> Serial<Self> {
@@ -324,7 +312,7 @@ impl Register for Pl011 {
         self.registers().uartdr.write(UARTDR::DATA.val(byte as u32));
     }
 
-    fn read_byte(&self) -> Result<u8, TransferError> {
+    fn read_byte(&mut self) -> Result<u8, TransferError> {
         let dr = self.registers().uartdr.extract();
         let data = dr.read(UARTDR::DATA) as u8;
 
@@ -467,8 +455,7 @@ impl Register for Pl011 {
         mask
     }
 
-    fn line_status(&self) -> LineStatus {
-        use tock_registers::interfaces::Readable;
+    fn line_status(&mut self) -> LineStatus {
         let mut status = LineStatus::empty();
 
         let fr = self.registers().uartfr.extract();
@@ -498,8 +485,8 @@ impl Register for Pl011 {
         self.base.as_ptr() as usize
     }
 
-    fn set_base(&mut self, base: NonNull<u8>) {
-        self.base = base.cast();
+    fn set_base(&mut self, base: usize) {
+        self.base = NonNull::new(base as *mut Pl011Registers).unwrap();
     }
 
     fn clock_freq(&self) -> u32 {

@@ -388,7 +388,7 @@ mod tests {
         let mut buff = [0u8; 1];
         for (i, b) in test_data.iter().enumerate() {
             // 发送一个字节
-            let sent = tx.send(&[*b]);
+            let sent = tx.send(&[*b]).unwrap();
             if sent != 1 {
                 panic!("✗ Failed to send byte {}: sent {}", i, sent);
             }
@@ -1287,7 +1287,7 @@ mod tests {
             // 快速发送数据
             let test_string = format!("Stress iteration {}", i);
             let test_data = test_string.as_bytes();
-            let sent_bytes = tx.send(test_data);
+            let sent_bytes = tx.send(test_data).unwrap();
 
             // 短暂等待
             for _ in 0..2000 {

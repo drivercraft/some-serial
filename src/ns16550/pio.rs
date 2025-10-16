@@ -1,0 +1,373 @@
+//! NS16550 IO Port 版本实现
+//!
+//! 仅在 x86_64 架构下编译，使用 x86_64 crate 进行端口 I/O
+
+use rdif_serial::{
+    Config, ConfigError, DataBits, Parity, Register, TransferError, StopBits,
+};
+
+use rdif_serial::{InterruptMask, LineStatus};
+use x86_64::instructions::port::Port;
+
+use crate::ns16550::registers::*;
+
+/// NS16550 IO Port 版本驱动
+#[derive(Clone, Debug)]
+pub struct Ns16550Pio {
+    base_port: u16,
+    clock_freq: u32,
+}
+
+unsafe impl Send for Ns16550Pio {}
+
+unsafe impl Sync for Ns16550Pio {}
+
+impl Ns16550Pio {
+    /// 创建新的 NS16550 IO Port 实例
+    ///
+    /// # Arguments
+    /// * `base_port` - IO 端口基地址
+    /// * `clock_freq` - 输入时钟频率 (Hz)
+    pub fn new(base_port: u16, clock_freq: u32) -> Self {
+        Self {
+            base_port,
+            clock_freq,
+        }
+    }
+
+    /// 读取寄存器
+    #[inline]
+    fn read_reg(&self, offset: u8) -> u8 {
+        unsafe { Port::new(self.base_port + offset as u16).read() }
+    }
+
+    /// 写入寄存器
+    #[inline]
+    fn write_reg(&mut self, offset: u8, value: u8) {
+        unsafe {
+            x86_64::instructions::port::Port::new(self.base_port + offset as u16).write(value);
+        }
+    }
+
+    /// 检查是否为 16550+（支持 FIFO）
+    pub fn is_16550_plus(&self) -> bool {
+        // 通过读取 IIR 寄存器的 FIFO 位来判断
+        // IIR 的位7-6在 16550+ 中会显示 FIFO 启用状态
+        let iir = self.read_reg(UART_IIR);
+        (iir & UART_IIR_FIFO_MASK) == UART_IIR_FIFO_ENABLE
+    }
+
+    /// 设置波特率
+    fn set_baudrate_internal(&mut self, baudrate: u32) -> Result<(), ConfigError> {
+        if baudrate == 0 || self.clock_freq == 0 {
+            return Err(ConfigError::InvalidBaudrate);
+        }
+
+        let divisor = self.clock_freq / (16 * baudrate);
+        if divisor == 0 || divisor > 0xFFFF {
+            return Err(ConfigError::InvalidBaudrate);
+        }
+
+        // 保存原始 LCR
+        let original_lcr = self.read_reg(UART_LCR);
+
+        // 设置 DLAB 以访问波特率除数寄存器
+        self.write_reg(UART_LCR, original_lcr | UART_LCR_DLAB);
+
+        // 设置除数
+        self.write_reg(UART_DLL, (divisor & 0xFF) as u8);
+        self.write_reg(UART_DLH, ((divisor >> 8) & 0xFF) as u8);
+
+        // 恢复原始 LCR
+        self.write_reg(UART_LCR, original_lcr);
+
+        Ok(())
+    }
+
+    /// 设置数据位
+    fn set_data_bits_internal(&mut self, bits: DataBits) -> Result<(), ConfigError> {
+        let wlen = match bits {
+            DataBits::Five => UART_LCR_WLEN5,
+            DataBits::Six => UART_LCR_WLEN6,
+            DataBits::Seven => UART_LCR_WLEN7,
+            DataBits::Eight => UART_LCR_WLEN8,
+        };
+
+        let original_lcr = self.read_reg(UART_LCR);
+        self.write_reg(UART_LCR, (original_lcr & !UART_LCR_WLEN_MASK) | wlen);
+
+        Ok(())
+    }
+
+    /// 设置停止位
+    fn set_stop_bits_internal(&mut self, bits: StopBits) -> Result<(), ConfigError> {
+        let original_lcr = self.read_reg(UART_LCR);
+        match bits {
+            StopBits::One => {
+                self.write_reg(UART_LCR, original_lcr & !UART_LCR_STOP);
+            }
+            StopBits::Two => {
+                self.write_reg(UART_LCR, original_lcr | UART_LCR_STOP);
+            }
+        }
+        Ok(())
+    }
+
+    /// 设置奇偶校验
+    fn set_parity_internal(&mut self, parity: Parity) -> Result<(), ConfigError> {
+        let original_lcr = self.read_reg(UART_LCR);
+
+        let new_lcr = match parity {
+            Parity::None => original_lcr & !(UART_LCR_PARITY | UART_LCR_EPAR | UART_LCR_SPAR),
+            Parity::Odd => (original_lcr | UART_LCR_PARITY) & !(UART_LCR_EPAR | UART_LCR_SPAR),
+            Parity::Even => (original_lcr | UART_LCR_PARITY | UART_LCR_EPAR) & !UART_LCR_SPAR,
+            Parity::Mark => original_lcr | UART_LCR_PARITY | UART_LCR_SPAR,
+            Parity::Space => original_lcr | UART_LCR_PARITY | UART_LCR_EPAR | UART_LCR_SPAR,
+        };
+
+        self.write_reg(UART_LCR, new_lcr);
+        Ok(())
+    }
+
+    /// 初始化 UART
+    fn init(&mut self) {
+        // 禁用中断
+        self.write_reg(UART_IER, 0);
+
+        // 启用 FIFO（如果是 16550+）
+        if self.is_16550_plus() {
+            self.write_reg(
+                UART_FCR,
+                UART_FCR_ENABLE_FIFO
+                    | UART_FCR_CLEAR_RCVR
+                    | UART_FCR_CLEAR_XMIT
+                    | UART_FCR_TRIGGER_1,
+            );
+        }
+
+        // 禁用环回模式
+        let original_mcr = self.read_reg(UART_MCR);
+        self.write_reg(UART_MCR, original_mcr & !UART_MCR_LOOP);
+
+        // 确保传输器启用
+        let original_mcr = self.read_reg(UART_MCR);
+        self.write_reg(UART_MCR, original_mcr | UART_MCR_DTR | UART_MCR_RTS);
+    }
+}
+
+impl Register for Ns16550Pio {
+    fn write_byte(&mut self, byte: u8) {
+        self.write_reg(UART_THR, byte);
+    }
+
+    fn read_byte(&mut self) -> Result<u8, TransferError> {
+        let lsr = self.read_reg(UART_LSR);
+
+        // 检查错误标志
+        if lsr & UART_LSR_OE != 0 {
+            return Err(TransferError::Overrun(0));
+        }
+        if lsr & UART_LSR_PE != 0 {
+            return Err(TransferError::Parity);
+        }
+        if lsr & UART_LSR_FE != 0 {
+            return Err(TransferError::Framing);
+        }
+        if lsr & UART_LSR_BI != 0 {
+            return Err(TransferError::Break);
+        }
+
+        // 读取数据
+        Ok(self.read_reg(UART_RBR))
+    }
+
+    fn set_config(&mut self, config: &Config) -> Result<(), ConfigError> {
+        // 配置波特率
+        if let Some(baudrate) = config.baudrate {
+            self.set_baudrate_internal(baudrate)?;
+        }
+
+        // 配置数据位
+        if let Some(data_bits) = config.data_bits {
+            self.set_data_bits_internal(data_bits)?;
+        }
+
+        // 配置停止位
+        if let Some(stop_bits) = config.stop_bits {
+            self.set_stop_bits_internal(stop_bits)?;
+        }
+
+        // 配置奇偶校验
+        if let Some(parity) = config.parity {
+            self.set_parity_internal(parity)?;
+        }
+
+        Ok(())
+    }
+
+    fn baudrate(&self) -> u32 {
+        // 只读方式获取波特率，通过读取 DLL 和 DLH
+        // 注意：如果 DLAB 未设置，读取的可能不是除数值
+        let dll = self.read_reg(UART_DLL) as u16;
+        let dlh = self.read_reg(UART_DLH) as u16;
+        let divisor = dll | (dlh << 8);
+
+        if divisor == 0 {
+            return 0;
+        }
+
+        self.clock_freq / (16 * divisor as u32)
+    }
+
+    fn data_bits(&self) -> DataBits {
+        let lcr = self.read_reg(UART_LCR);
+        match lcr & UART_LCR_WLEN_MASK {
+            UART_LCR_WLEN5 => DataBits::Five,
+            UART_LCR_WLEN6 => DataBits::Six,
+            UART_LCR_WLEN7 => DataBits::Seven,
+            UART_LCR_WLEN8 => DataBits::Eight,
+            _ => DataBits::Eight, // 默认值
+        }
+    }
+
+    fn stop_bits(&self) -> StopBits {
+        let lcr = self.read_reg(UART_LCR);
+        if lcr & UART_LCR_STOP != 0 {
+            StopBits::Two
+        } else {
+            StopBits::One
+        }
+    }
+
+    fn parity(&self) -> Parity {
+        let lcr = self.read_reg(UART_LCR);
+
+        if lcr & UART_LCR_PARITY == 0 {
+            Parity::None
+        } else if lcr & UART_LCR_SPAR != 0 {
+            // Stick parity
+            if lcr & UART_LCR_EPAR != 0 {
+                Parity::Space
+            } else {
+                Parity::Mark
+            }
+        } else {
+            // Normal parity
+            if lcr & UART_LCR_EPAR != 0 {
+                Parity::Even
+            } else {
+                Parity::Odd
+            }
+        }
+    }
+
+    fn open(&mut self) {
+        self.init();
+    }
+
+    fn close(&mut self) {
+        // 禁用中断
+        self.write_reg(UART_IER, 0);
+
+        // 禁用 FIFO
+        self.write_reg(UART_FCR, 0);
+
+        // 禁用 DTR 和 RTS
+        let original_mcr = self.read_reg(UART_MCR);
+        self.write_reg(UART_MCR, original_mcr & !(UART_MCR_DTR | UART_MCR_RTS));
+    }
+
+    fn clean_interrupt_status(&mut self) -> InterruptMask {
+        let iir = self.read_reg(UART_IIR);
+        let mut mask = InterruptMask::empty();
+
+        match iir & UART_IIR_INTERRUPT_MASK {
+            UART_IIR_RLSI => {} // 线路状态中断，由用户处理错误
+            UART_IIR_RDI | UART_IIR_CTI => mask |= InterruptMask::RX_AVAILABLE,
+            UART_IIR_THRI => mask |= InterruptMask::TX_EMPTY,
+            UART_IIR_MSI => {} // Modem 状态中断，暂不映射
+            _ => {}
+        }
+
+        mask
+    }
+
+    fn line_status(&mut self) -> LineStatus {
+        let lsr = self.read_reg(UART_LSR);
+        let mut status = LineStatus::empty();
+
+        if lsr & UART_LSR_DR != 0 {
+            status |= LineStatus::DATA_READY;
+        }
+        if lsr & UART_LSR_THRE != 0 {
+            status |= LineStatus::TX_HOLDING_EMPTY;
+        }
+
+        status
+    }
+
+    fn read_reg(&self, offset: usize) -> u32 {
+        self.read_reg(offset as u8) as u32
+    }
+
+    fn write_reg(&mut self, offset: usize, value: u32) {
+        self.write_reg(offset as u8, value as u8);
+    }
+
+    fn get_base(&self) -> usize {
+        self.base_port as usize
+    }
+
+    fn set_base(&mut self, base: usize) {
+        self.base_port = base as u16;
+    }
+
+    fn clock_freq(&self) -> u32 {
+        self.clock_freq
+    }
+
+    fn enable_loopback(&mut self) {
+        let original_mcr = self.read_reg(UART_MCR);
+        self.write_reg(UART_MCR, original_mcr | UART_MCR_LOOP);
+    }
+
+    fn disable_loopback(&mut self) {
+        let original_mcr = self.read_reg(UART_MCR);
+        self.write_reg(UART_MCR, original_mcr & !UART_MCR_LOOP);
+    }
+
+    fn is_loopback_enabled(&self) -> bool {
+        self.read_reg(UART_MCR) & UART_MCR_LOOP != 0
+    }
+
+    fn set_irq_mask(&mut self, mask: InterruptMask) {
+        let mut ier = 0;
+
+        if mask.contains(InterruptMask::RX_AVAILABLE) {
+            ier |= UART_IER_RDI;
+        }
+        if mask.contains(InterruptMask::TX_EMPTY) {
+            ier |= UART_IER_THRI;
+        }
+        // 目前不支持错误中断的直接映射
+        // 用户可以通过读取状态寄存器检查错误
+
+        self.write_reg(UART_IER, ier);
+    }
+
+    fn get_irq_mask(&self) -> InterruptMask {
+        let ier = self.read_reg(UART_IER);
+        let mut mask = InterruptMask::empty();
+
+        if ier & UART_IER_RDI != 0 {
+            mask |= InterruptMask::RX_AVAILABLE;
+        }
+        if ier & UART_IER_THRI != 0 {
+            mask |= InterruptMask::TX_EMPTY;
+        }
+        // 错误中断暂不映射到 InterruptMask
+        // 用户需要通过状态寄存器检查错误
+
+        mask
+    }
+}

@@ -288,9 +288,9 @@ dependencies = [
 
 [[package]]
 name = "cfg-if"
-version = "1.0.3"
+version = "1.0.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "2fd1289c04a9ea8cb22300a459a72a385d7c73d3259e2ed7dcb2af674838cfa9"
+checksum = "9330f8b2ff13f34540b44e946ef35111825727b38d33286ef986142615121801"
 
 [[package]]
 name = "convert_case"
@@ -1246,9 +1246,9 @@ checksum = "42f5e15c9953c5e4ccceeb2e7382a716482c34515315f7b03532b8b4e8393d2d"
 
 [[package]]
 name = "openssl"
-version = "0.10.73"
+version = "0.10.74"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "8505734d46c8ab1e19a1dce3aef597ad87dcb4c37e7188231769bd6bd51cebf8"
+checksum = "24ad14dd45412269e1a30f52ad8f0664f0f4f4a89ee8fe28c3b3527021ebb654"
 dependencies = [
  "bitflags 2.9.4",
  "cfg-if",
@@ -1278,9 +1278,9 @@ checksum = "d05e27ee213611ffe7d6348b942e8f942b37114c00cc03cec254295a4a17852e"
 
 [[package]]
 name = "openssl-sys"
-version = "0.9.109"
+version = "0.9.110"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "90096e2e47630d78b7d1c20952dc621f957103f8bc2c8359ec81290d75238571"
+checksum = "0a9f0075ba3c21b09f8e8b2026584b1d18d49388648f2fbbf3c97ea8deced8e2"
 dependencies = [
  "cc",
  "libc",
@@ -1522,6 +1522,17 @@ dependencies = [
 [[package]]
 name = "rdif-base"
 version = "0.7.0"
+dependencies = [
+ "as-any",
+ "async-trait",
+ "paste",
+ "rdif-def",
+ "thiserror 2.0.17",
+]
+
+[[package]]
+name = "rdif-base"
+version = "0.7.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "4f8c32d8cbc18633a412130719b07d31135215d1715ac48fc3888ca835a811ba"
 dependencies = [
@@ -1548,18 +1559,18 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "170ec813e6cf4d1e5fa53fa8fed0fadc7aaab96683d4f1d44c602a6109931eb4"
 dependencies = [
  "cfg-if",
- "rdif-base",
+ "rdif-base 0.7.0 (registry+https://github.com/rust-lang/crates.io-index)",
  "thiserror 2.0.17",
 ]
 
 [[package]]
 name = "rdif-pcie"
-version = "0.1.3"
+version = "0.1.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "0abf057b17ca5ead0ee41c485bf3c2781fd9bbf88cc678539fa361aa5db3ed8d"
+checksum = "60c6e8dea6d432b2c03bc3f4238dc59a276aacac6f688a937351e7a313918738"
 dependencies = [
  "pci_types",
- "rdif-base",
+ "rdif-base 0.7.0 (registry+https://github.com/rust-lang/crates.io-index)",
  "thiserror 2.0.17",
 ]
 
@@ -1569,19 +1580,17 @@ version = "0.6.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "c7b6eefca0d1b44a5bef1e934d8ab2c8e00e19dd3d9e071855c0933637ee17a0"
 dependencies = [
- "rdif-base",
+ "rdif-base 0.7.0 (registry+https://github.com/rust-lang/crates.io-index)",
 ]
 
 [[package]]
 name = "rdif-serial"
-version = "0.5.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "e344cd8dbb20b776594e553d0f5aae6c24edf20cf30798341bf62962724beae9"
+version = "0.5.2"
 dependencies = [
  "bitflags 2.9.4",
  "futures",
  "mbarrier",
- "rdif-base",
+ "rdif-base 0.7.0",
  "spin 0.10.0",
  "thiserror 2.0.17",
 ]
@@ -1592,20 +1601,20 @@ version = "0.5.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "e11da4f362ab6cdcdee9d8e795faabd0f15e04167cb17939fd3aca19c2ef3421"
 dependencies = [
- "rdif-base",
+ "rdif-base 0.7.0 (registry+https://github.com/rust-lang/crates.io-index)",
 ]
 
 [[package]]
 name = "rdrive"
-version = "0.18.10"
+version = "0.18.11"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "31c8f4f35afa65218795cbd5d2cb52c6e44e1fade40900966b0ec8bbd2a10ff3"
+checksum = "f28163d9cd26a17d444424168fde0f5f6f8b867cffdc7de617c2d0865eecf156"
 dependencies = [
  "fdt-parser",
  "log",
  "paste",
  "pcie",
- "rdif-base",
+ "rdif-base 0.7.0 (registry+https://github.com/rust-lang/crates.io-index)",
  "rdif-pcie",
  "rdrive-macros",
  "spin 0.10.0",
@@ -2054,9 +2063,10 @@ dependencies = [
  "bare-test-macros",
  "bitflags 2.9.4",
  "dma-api",
+ "heapless 0.9.1",
  "log",
  "mbarrier",
- "rdif-base",
+ "rdif-base 0.7.0 (registry+https://github.com/rust-lang/crates.io-index)",
  "rdif-serial",
  "spin 0.10.0",
  "thiserror 2.0.17",
