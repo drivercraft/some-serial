@@ -1,6 +1,14 @@
 [package]
-edition = "2024"
+authors = ["周睿 <zrufo747@outlook.com>"]
+categories = ["embedded", "hardware-support", "no-std"]
+description = "Unified serial driver collection for embedded and bare-metal environments"
+documentation = "https://docs.rs/some-serial"
+edition = "2021"
+homepage = "https://github.com/drivercraft/some-serial"
+keywords = ["serial", "uart", "embedded", "bare-metal"]
+license = "MIT OR Apache-2.0"
 name = "some-serial"
+repository = "https://github.com/drivercraft/some-serial"
 version = "0.1.0"
 
 [dependencies]
@@ -26,3 +34,12 @@ bare-test-macros = "0.2"
 [[test]]
 harness = false
 name = "test"
+
+
+[package.metadata.docs.rs]
+all-features = true
+rustdoc-args = ["--cfg", "docsrs"]
+targets = ["aarch64-unknown-none-softfloat", "x86_64-unknown-none"]
+
+[package.metadata.playground]
+all-features = true
