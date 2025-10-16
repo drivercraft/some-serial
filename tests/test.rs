@@ -2,6 +2,7 @@
 #![no_main]
 #![feature(used_with_arg)]
 
+#[macro_use]
 extern crate alloc;
 extern crate bare_test;
 
@@ -112,9 +113,11 @@ mod tests {
         // 测试回环功能
         let test_data = b"Hello";
         info!("Testing loopback with data: {test_data:?}");
-        test_serial_loopback_with_data(&mut serial, &mut tx, &mut rx, test_data)
-            .expect("loopback should succeed");
+        test_serial_tx_rx_one(&mut tx, &mut rx, test_data).expect("loopback should succeed");
+        info!("✓ Loopback test passed");
 
+        // test_overrun(&mut tx, &mut rx);
+        // info!("✓ Overrun test passed");
         // 清理资源
         drop(tx);
         drop(rx);
@@ -122,69 +125,69 @@ mod tests {
         info!("=== Serial Basic Loopback Test Completed ===");
     }
 
-    // /// Serial 资源管理测试 - 验证 RAII 和资源生命周期
-    // #[test]
-    // fn test_serial_resource_management() {
-    //     info!("=== Serial Resource Management Test ===");
+    /// Serial 资源管理测试 - 验证 RAII 和资源生命周期
+    #[test]
+    fn test_serial_resource_management() {
+        info!("=== Serial Resource Management Test ===");
 
-    //     let mut serial = create_test_serial();
+        let mut serial = create_test_serial();
 
-    //     // 测试 1: 初始状态应该有资源
-    //     {
-    //         let tx = serial.take_tx();
-    //         let rx = serial.take_rx();
-    //         assert!(tx.is_some(), "TX should be available initially");
-    //         assert!(rx.is_some(), "RX should be available initially");
-    //         info!("✓ Initial resource availability verified");
+        // 测试 1: 初始状态应该有资源
+        {
+            let tx = serial.take_tx();
+            let rx = serial.take_rx();
+            assert!(tx.is_some(), "TX should be available initially");
+            assert!(rx.is_some(), "RX should be available initially");
+            info!("✓ Initial resource availability verified");
 
-    //         // 测试 2: 资源被占用后应该不可用
-    //         let tx2 = serial.take_tx();
-    //         let rx2 = serial.take_rx();
-    //         assert!(tx2.is_none(), "TX should not be available when occupied");
-    //         assert!(rx2.is_none(), "RX should not be available when occupied");
-    //         info!("✓ Resource exclusivity verified");
-    //     } // 资源在这里被 Drop
+            // 测试 2: 资源被占用后应该不可用
+            let tx2 = serial.take_tx();
+            let rx2 = serial.take_rx();
+            assert!(tx2.is_none(), "TX should not be available when occupied");
+            assert!(rx2.is_none(), "RX should not be available when occupied");
+            info!("✓ Resource exclusivity verified");
+        } // 资源在这里被 Drop
 
-    //     // 测试 3: Drop 后资源应该恢复可用
-    //     {
-    //         let tx = serial.take_tx();
-    //         let rx = serial.take_rx();
-    //         assert!(tx.is_some(), "TX should be available after drop");
-    //         assert!(rx.is_some(), "RX should be available after drop");
-    //         info!("✓ Resource recovery after drop verified");
-    //     }
+        // 测试 3: Drop 后资源应该恢复可用
+        {
+            let tx = serial.take_tx();
+            let rx = serial.take_rx();
+            assert!(tx.is_some(), "TX should be available after drop");
+            assert!(rx.is_some(), "RX should be available after drop");
+            info!("✓ Resource recovery after drop verified");
+        }
 
-    //     // 测试 4: 重复获取和释放
-    //     for i in 0..3 {
-    //         let _tx = serial.take_tx();
-    //         let _rx = serial.take_rx();
-    //         info!("✓ Resource cycle {} completed", i + 1);
-    //     }
+        // 测试 4: 重复获取和释放
+        for i in 0..3 {
+            let _tx = serial.take_tx();
+            let _rx = serial.take_rx();
+            info!("✓ Resource cycle {} completed", i + 1);
+        }
 
-    //     info!("=== Serial Resource Management Test Completed ===");
-    // }
+        info!("=== Serial Resource Management Test Completed ===");
+    }
 
-    // /// Serial Interface trait 完整性测试
-    // #[test]
-    // fn test_serial_interface_compliance() {
-    //     info!("=== Serial Interface Compliance Test ===");
+    /// Serial Interface trait 完整性测试
+    #[test]
+    fn test_serial_interface_compliance() {
+        info!("=== Serial Interface Compliance Test ===");
 
-    //     let mut serial = create_test_serial();
+        let mut serial = create_test_serial();
 
-    //     // 测试配置管理
-    //     test_serial_configuration(&mut serial);
+        // 测试配置管理
+        test_serial_configuration(&mut serial);
 
-    //     // 测试回环控制
-    //     test_serial_loopback_control(&mut serial);
+        // 测试回环控制
+        test_serial_loopback_control(&mut serial);
 
-    //     // 测试中断管理
-    //     test_serial_interrupt_management(&mut serial);
+        // 测试中断管理
+        test_serial_interrupt_management(&mut serial);
 
-    //     // 测试 DriverGeneric 接口
-    //     test_serial_driver_generic(&mut serial);
+        // 测试 DriverGeneric 接口
+        test_serial_driver_generic(&mut serial);
 
-    //     info!("=== Serial Interface Compliance Test Completed ===");
-    // }
+        info!("=== Serial Interface Compliance Test Completed ===");
+    }
 
     // /// Serial 多数据模式回环测试
     // #[test]
@@ -355,20 +358,29 @@ mod tests {
         }
     }
 
+    // Qemu 环境下无法测试此功能
+    // fn test_overrun(tx: &mut BSender, rx: &mut BReciever) {
+    //     info!("Testing overrun condition...");
+    //     rx.clean_fifo();
+    //     let send = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789";
+    //     let mut left = &send[..];
+    //     let mut buff = [0u8; 256];
+    //     while !left.is_empty() {
+    //         let n = tx.send(left);
+    //         left = &left[n..];
+    //     }
+    //     info!("Sent {} bytes", send.len());
+    //     let res = rx.recive(&mut buff);
+    //     info!("Receive {res:?}");
+    //     assert!(matches!(res, Err(TransferError::Overrun)));
+    // }
+
     /// Serial 回环数据测试函数
-    fn test_serial_loopback_with_data(
-        serial: &mut some_serial::Serial<some_serial::pl011::Pl011>,
+    fn test_serial_tx_rx_one(
         tx: &mut BSender,
         rx: &mut BReciever,
         test_data: &[u8],
     ) -> Result<(), TransferError> {
-        // 确保回环模式启用
-        if !serial.is_loopback_enabled() {
-            serial.enable_loopback();
-        }
-        if !serial.is_loopback_enabled() {
-            panic!("✗ Failed to enable loopback mode");
-        }
         let mut rcv_buff = Vec::with_capacity(64);
 
         // 尽量清空残留数据，避免与本次测试混淆
@@ -816,116 +828,116 @@ mod tests {
     //     info!("✓ RX interrupt basic test completed");
     // }
 
-    // /// 中断掩码控制测试
-    // #[test]
-    // fn test_interrupt_mask_control() {
-    //     info!("=== Interrupt Mask Control Test ===");
+    /// 中断掩码控制测试
+    #[test]
+    fn test_interrupt_mask_control() {
+        info!("=== Interrupt Mask Control Test ===");
 
-    //     let mut serial = create_test_serial();
-    //     serial.open().expect("Failed to open serial");
+        let mut serial = create_test_serial();
+        serial.open().expect("Failed to open serial");
 
-    //     // 重置中断计数器
-    //     reset_interrupt_counters();
-    //     print_interrupt_counts("initial");
+        // 重置中断计数器
+        reset_interrupt_counters();
+        print_interrupt_counts("initial");
 
-    //     // 测试1：仅启用TX中断
-    //     info!("Test 1: Enable TX interrupt only");
-    //     serial.enable_interrupts(InterruptMask::TX_EMPTY);
+        // 测试1：仅启用TX中断
+        info!("Test 1: Enable TX interrupt only");
+        serial.enable_interrupts(InterruptMask::TX_EMPTY);
 
-    //     // 启用回环并发送数据
-    //     serial.enable_loopback();
-    //     let mut tx = serial.take_tx().unwrap();
-    //     tx.send(b"TX mask test");
+        // 启用回环并发送数据
+        serial.enable_loopback();
+        let mut tx = serial.take_tx().unwrap();
+        tx.send(b"TX mask test");
 
-    //     // 等待中断处理
-    //     for _ in 0..5000 {
-    //         core::hint::spin_loop();
-    //     }
+        // 等待中断处理
+        for _ in 0..5000 {
+            core::hint::spin_loop();
+        }
 
-    //     let (tx_count1, rx_count1, _) = get_interrupt_counts();
-    //     info!("After TX-only: TX={}, RX={}", tx_count1, rx_count1);
+        let (tx_count1, rx_count1, _) = get_interrupt_counts();
+        info!("After TX-only: TX={}, RX={}", tx_count1, rx_count1);
 
-    //     // 清理
-    //     drop(tx);
-    //     serial.disable_interrupts(InterruptMask::TX_EMPTY | InterruptMask::RX_AVAILABLE);
-    //     reset_interrupt_counters();
+        // 清理
+        drop(tx);
+        serial.disable_interrupts(InterruptMask::TX_EMPTY | InterruptMask::RX_AVAILABLE);
+        reset_interrupt_counters();
 
-    //     // 测试2：仅启用RX中断
-    //     info!("Test 2: Enable RX interrupt only");
-    //     serial.enable_interrupts(InterruptMask::RX_AVAILABLE);
+        // 测试2：仅启用RX中断
+        info!("Test 2: Enable RX interrupt only");
+        serial.enable_interrupts(InterruptMask::RX_AVAILABLE);
 
-    //     let mut tx = serial.take_tx().unwrap();
-    //     let mut rx = serial.take_rx().unwrap();
-    //     tx.send(b"RX mask test");
+        let mut tx = serial.take_tx().unwrap();
+        let mut rx = serial.take_rx().unwrap();
+        tx.send(b"RX mask test");
 
-    //     // 等待中断处理
-    //     for _ in 0..5000 {
-    //         core::hint::spin_loop();
-    //     }
+        // 等待中断处理
+        for _ in 0..5000 {
+            core::hint::spin_loop();
+        }
 
-    //     // 尝试接收数据
-    //     let mut recv_buf = vec![0u8; 20];
-    //     let _ = rx.recive(&mut recv_buf);
+        // 尝试接收数据
+        let mut recv_buf = vec![0u8; 20];
+        let _ = rx.recive(&mut recv_buf);
 
-    //     for _ in 0..5000 {
-    //         core::hint::spin_loop();
-    //     }
+        for _ in 0..5000 {
+            core::hint::spin_loop();
+        }
 
-    //     let (tx_count2, rx_count2, _) = get_interrupt_counts();
-    //     info!("After RX-only: TX={}, RX={}", tx_count2, rx_count2);
+        let (tx_count2, rx_count2, _) = get_interrupt_counts();
+        info!("After RX-only: TX={}, RX={}", tx_count2, rx_count2);
 
-    //     // 清理
-    //     drop(tx);
-    //     drop(rx);
-    //     serial.disable_interrupts(InterruptMask::TX_EMPTY | InterruptMask::RX_AVAILABLE);
-    //     reset_interrupt_counters();
+        // 清理
+        drop(tx);
+        drop(rx);
+        serial.disable_interrupts(InterruptMask::TX_EMPTY | InterruptMask::RX_AVAILABLE);
+        reset_interrupt_counters();
 
-    //     // 测试3：启用TX和RX中断
-    //     info!("Test 3: Enable both TX and RX interrupts");
-    //     serial.enable_interrupts(InterruptMask::TX_EMPTY | InterruptMask::RX_AVAILABLE);
+        // 测试3：启用TX和RX中断
+        info!("Test 3: Enable both TX and RX interrupts");
+        serial.enable_interrupts(InterruptMask::TX_EMPTY | InterruptMask::RX_AVAILABLE);
 
-    //     let mut tx = serial.take_tx().unwrap();
-    //     let mut rx = serial.take_rx().unwrap();
-    //     tx.send(b"Both mask test");
+        let mut tx = serial.take_tx().unwrap();
+        let mut rx = serial.take_rx().unwrap();
+        tx.send(b"Both mask test");
 
-    //     for _ in 0..5000 {
-    //         core::hint::spin_loop();
-    //     }
+        for _ in 0..5000 {
+            core::hint::spin_loop();
+        }
 
-    //     let mut recv_buf = vec![0u8; 20];
-    //     let _ = rx.recive(&mut recv_buf);
+        let mut recv_buf = vec![0u8; 20];
+        let _ = rx.recive(&mut recv_buf);
 
-    //     for _ in 0..5000 {
-    //         core::hint::spin_loop();
-    //     }
+        for _ in 0..5000 {
+            core::hint::spin_loop();
+        }
 
-    //     let (tx_count3, rx_count3, _) = get_interrupt_counts();
-    //     info!("After both: TX={}, RX={}", tx_count3, rx_count3);
+        let (tx_count3, rx_count3, _) = get_interrupt_counts();
+        info!("After both: TX={}, RX={}", tx_count3, rx_count3);
 
-    //     // 验证掩码控制有效性
-    //     if tx_count1 > 0 && rx_count1 == 0 {
-    //         info!("✓ TX-only mask test passed");
-    //     } else {
-    //         info!("✗ TX-only mask test failed");
-    //     }
+        // 验证掩码控制有效性
+        if tx_count1 > 0 && rx_count1 == 0 {
+            info!("✓ TX-only mask test passed");
+        } else {
+            panic!("✗ TX-only mask test failed");
+        }
 
-    //     if tx_count2 == 0 && rx_count2 > 0 {
-    //         info!("✓ RX-only mask test passed");
-    //     } else {
-    //         info!("✗ RX-only mask test failed");
-    //     }
+        if tx_count2 == 0 && rx_count2 > 0 {
+            info!("✓ RX-only mask test passed");
+        } else {
+            panic!("✗ RX-only mask test failed");
+        }
 
-    //     if tx_count3 > 0 && rx_count3 > 0 {
-    //         info!("✓ Both interrupts mask test passed");
-    //     } else {
-    //         info!("✗ Both interrupts mask test failed");
-    //     }
+        if tx_count3 > 0 && rx_count3 > 0 {
+            info!("✓ Both interrupts mask test passed");
+        } else {
+            panic!("✗ Both interrupts mask test failed");
+        }
 
-    //     // 最终清理
-    //     serial.disable_interrupts(InterruptMask::TX_EMPTY | InterruptMask::RX_AVAILABLE);
-    //     serial.disable_loopback();
-    //     info!("✓ Interrupt mask control test completed");
-    // }
+        // 最终清理
+        serial.disable_interrupts(InterruptMask::TX_EMPTY | InterruptMask::RX_AVAILABLE);
+        serial.disable_loopback();
+        info!("✓ Interrupt mask control test completed");
+    }
 
     // /// 中断与数据传输集成测试
     // #[test]
@@ -1235,148 +1247,146 @@ mod tests {
     //     info!("✓ Interrupt multi-pattern test completed");
     // }
 
-    // /// 中断压力测试
-    // #[test]
-    // fn test_interrupt_stress() {
-    //     info!("=== Interrupt Stress Test ===");
+    /// 中断压力测试
+    #[test]
+    fn test_interrupt_stress() {
+        info!("=== Interrupt Stress Test ===");
 
-    //     let mut serial = create_test_serial();
-    //     serial.open().expect("Failed to open serial");
+        let mut serial = create_test_serial();
+        serial.enable_loopback();
+        serial.open().expect("Failed to open serial");
 
-    //     // 配置串口
-    //     let config = some_serial::Config::new()
-    //         .baudrate(115200)
-    //         .data_bits(DataBits::Eight)
-    //         .stop_bits(StopBits::One)
-    //         .parity(Parity::None);
+        // 配置串口
+        let config = some_serial::Config::new()
+            .baudrate(115200)
+            .data_bits(DataBits::Eight)
+            .stop_bits(StopBits::One)
+            .parity(Parity::None);
 
-    //     if let Err(e) = serial.set_config(&config) {
-    //         info!("Serial config failed: {:?}", e);
-    //         return;
-    //     }
+        if let Err(e) = serial.set_config(&config) {
+            info!("Serial config failed: {:?}", e);
+            return;
+        }
 
-    //     // 重置中断计数器
-    //     reset_interrupt_counters();
-    //     print_interrupt_counts("initial");
+        // 重置中断计数器
+        reset_interrupt_counters();
+        print_interrupt_counts("initial");
 
-    //     // 启用所有中断
-    //     serial.enable_interrupts(InterruptMask::TX_EMPTY | InterruptMask::RX_AVAILABLE);
-    //     serial.enable_loopback();
+        // 启用所有中断
+        serial.enable_interrupts(InterruptMask::TX_EMPTY | InterruptMask::RX_AVAILABLE);
 
-    //     info!("Starting high-frequency interrupt stress test...");
+        info!("Starting high-frequency interrupt stress test...");
 
-    //     // 获取TX/RX接口
-    //     let mut tx = match serial.take_tx() {
-    //         Some(tx) => tx,
-    //         None => {
-    //             info!("✗ Failed to get TX interface");
-    //             return;
-    //         }
-    //     };
+        // 获取TX/RX接口
+        let mut tx = match serial.take_tx() {
+            Some(tx) => tx,
+            None => {
+                panic!("✗ Failed to get TX interface");
+            }
+        };
 
-    //     let mut rx = match serial.take_rx() {
-    //         Some(rx) => rx,
-    //         None => {
-    //             info!("✗ Failed to get RX interface");
-    //             return;
-    //         }
-    //     };
+        let mut rx = match serial.take_rx() {
+            Some(rx) => rx,
+            None => {
+                panic!("✗ Failed to get RX interface");
+            }
+        };
 
-    //     // 高频数据传输压力测试
-    //     let stress_iterations = 50;
-    //     let mut total_interrupts = 0;
-    //     let mut successful_iterations = 0;
+        // 高频数据传输压力测试
+        let stress_iterations = 50;
+        let mut total_interrupts = 0;
+        let mut successful_iterations = 0;
 
-    //     for i in 0..stress_iterations {
-    //         // 记录迭代开始时的中断计数
-    //         let (tx_before, rx_before, handler_before) = get_interrupt_counts();
+        for i in 0..stress_iterations {
+            // 记录迭代开始时的中断计数
+            let (tx_before, rx_before, _handler_before) = get_interrupt_counts();
 
-    //         // 快速发送数据
-    //         let test_string = format!("Stress iteration {}", i);
-    //         let test_data = test_string.as_bytes();
-    //         let sent_bytes = tx.send(test_data);
+            // 快速发送数据
+            let test_string = format!("Stress iteration {}", i);
+            let test_data = test_string.as_bytes();
+            let sent_bytes = tx.send(test_data);
 
-    //         // 短暂等待
-    //         for _ in 0..2000 {
-    //             core::hint::spin_loop();
-    //         }
+            // 短暂等待
+            for _ in 0..2000 {
+                core::hint::spin_loop();
+            }
 
-    //         // 尝试接收数据
-    //         let mut recv_buf = vec![0u8; test_data.len() + 10];
-    //         let receive_success = match rx.recive(&mut recv_buf) {
-    //             Ok(received_bytes) => received_bytes > 0 && received_bytes <= sent_bytes,
-    //             Err(_) => false,
-    //         };
+            // 尝试接收数据
+            let mut recv_buf = vec![0u8; test_data.len() + 10];
+            let receive_success = match rx.recive(&mut recv_buf) {
+                Ok(received_bytes) => received_bytes > 0 && received_bytes <= sent_bytes,
+                Err(_) => false,
+            };
 
-    //         // 再次等待
-    //         for _ in 0..2000 {
-    //             core::hint::spin_loop();
-    //         }
+            // 再次等待
+            for _ in 0..2000 {
+                core::hint::spin_loop();
+            }
 
-    //         // 检查中断活动
-    //         let (tx_after, rx_after, handler_after) = get_interrupt_counts();
-    //         let iteration_interrupts = (tx_after - tx_before) + (rx_after - rx_before);
-    //         total_interrupts += iteration_interrupts;
+            // 检查中断活动
+            let (tx_after, rx_after, _handler_after) = get_interrupt_counts();
+            let iteration_interrupts = (tx_after - tx_before) + (rx_after - rx_before);
+            total_interrupts += iteration_interrupts;
 
-    //         // 评估迭代成功
-    //         if iteration_interrupts > 0 && receive_success {
-    //             successful_iterations += 1;
-    //         }
+            // 评估迭代成功
+            if iteration_interrupts > 0 && receive_success {
+                successful_iterations += 1;
+            }
 
-    //         // 每10次迭代打印一次进度
-    //         if (i + 1) % 10 == 0 {
-    //             info!(
-    //                 "Stress progress: {}/{} iterations, {}/{} successful, {} total interrupts",
-    //                 i + 1,
-    //                 stress_iterations,
-    //                 successful_iterations,
-    //                 i + 1,
-    //                 total_interrupts
-    //             );
-    //         }
-    //     }
+            // 每10次迭代打印一次进度
+            if (i + 1) % 10 == 0 {
+                info!(
+                    "Stress progress: {}/{} iterations, {}/{} successful, {} total interrupts",
+                    i + 1,
+                    stress_iterations,
+                    successful_iterations,
+                    i + 1,
+                    total_interrupts
+                );
+            }
+        }
 
-    //     // 最终统计
-    //     let (final_tx, final_rx, final_handler) = get_interrupt_counts();
-    //     print_interrupt_counts("final");
+        // 最终统计
+        let (final_tx, final_rx, final_handler) = get_interrupt_counts();
+        print_interrupt_counts("final");
 
-    //     info!("Stress test results:");
-    //     info!("  Total iterations: {}", stress_iterations);
-    //     info!("  Successful iterations: {}", successful_iterations);
-    //     info!(
-    //         "  Success rate: {:.1}%",
-    //         (successful_iterations as f64 / stress_iterations as f64) * 100.0
-    //     );
-    //     info!("  Total interrupts: {}", total_interrupts);
-    //     info!(
-    //         "  Average interrupts per iteration: {:.1}",
-    //         total_interrupts as f64 / stress_iterations as f64
-    //     );
-    //     info!(
-    //         "  Final counts: TX={}, RX={}, Handler={}",
-    //         final_tx, final_rx, final_handler
-    //     );
+        info!("Stress test results:");
+        info!("  Total iterations: {}", stress_iterations);
+        info!("  Successful iterations: {}", successful_iterations);
+        info!(
+            "  Success rate: {:.1}%",
+            (successful_iterations as f64 / stress_iterations as f64) * 100.0
+        );
+        info!("  Total interrupts: {}", total_interrupts);
+        info!(
+            "  Average interrupts per iteration: {:.1}",
+            total_interrupts as f64 / stress_iterations as f64
+        );
+        info!(
+            "  Final counts: TX={}, RX={}, Handler={}",
+            final_tx, final_rx, final_handler
+        );
 
-    //     // 验证压力测试结果
-    //     if successful_iterations >= (stress_iterations / 2) {
-    //         info!("✓ Interrupt stress test passed - adequate performance under load");
-    //     } else {
-    //         info!("✗ Interrupt stress test failed - poor performance under load");
-    //     }
+        // 验证压力测试结果
+        if successful_iterations >= (stress_iterations / 2) {
+            info!("✓ Interrupt stress test passed - adequate performance under load");
+        } else {
+            panic!("✗ Interrupt stress test failed - poor performance under load");
+        }
 
-    //     if total_interrupts > stress_iterations {
-    //         info!("✓ Sufficient interrupt activity detected");
-    //     } else {
-    //         info!("✗ Insufficient interrupt activity detected");
-    //     }
+        if total_interrupts > stress_iterations {
+            info!("✓ Sufficient interrupt activity detected");
+        } else {
+            panic!("✗ Insufficient interrupt activity detected");
+        }
 
-    //     // 清理
-    //     drop(tx);
-    //     drop(rx);
-    //     serial.disable_interrupts(InterruptMask::TX_EMPTY | InterruptMask::RX_AVAILABLE);
-    //     serial.disable_loopback();
-    //     info!("✓ Interrupt stress test completed");
-    // }
+        // 清理
+        drop(tx);
+        drop(rx);
+        serial.disable_interrupts(InterruptMask::TX_EMPTY | InterruptMask::RX_AVAILABLE);
+        serial.disable_loopback();
+        info!("✓ Interrupt stress test completed");
+    }
 
     // /// 综合中断测试套件
     // #[test]
