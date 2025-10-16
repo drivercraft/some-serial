@@ -132,103 +132,101 @@ mod tests {
         info!("=== Serial Basic Loopback Test Completed ===");
     }
 
-    // /// 中断掩码控制测试
-    // #[test]
-    // fn test_interrupt_mask_control() {
-    //     info!("=== Interrupt Mask Control Test ===");
+    /// 中断掩码控制测试
+    #[test]
+    fn test_interrupt_mask_control() {
+        info!("=== Interrupt Mask Control Test ===");
 
-    //     let mut serial = create_test_serial();
-    //     serial.enable_loopback();
-    //     serial.open().expect("Failed to open serial");
+        let mut serial = create_test_serial();
+        serial.open().expect("Failed to open serial");
 
-    //     info!("Testing interrupt mask control for PL011 driver");
+        info!("Testing interrupt mask control for PL011 driver");
 
-    //     // 重置中断计数器
-    //     reset_interrupt_counters();
-    //     print_interrupt_counts("initial");
+        // 重置中断计数器
+        reset_interrupt_counters();
+        print_interrupt_counts("initial");
 
-    //     // 测试1：仅启用TX中断
-    //     info!("Test 1: Enable TX interrupt only");
-    //     serial.enable_interrupts(InterruptMask::TX_EMPTY);
+        // 测试1：仅启用TX中断
+        info!("Test 1: Enable TX interrupt only");
+        serial.enable_interrupts(InterruptMask::TX_EMPTY);
+        let mut tx = serial.take_tx().unwrap();
+        let _ = tx.send(b"TX mask test");
 
-    //     let mut tx = serial.take_tx().unwrap();
-    //     let _ = tx.send(b"TX mask test");
+        // 等待中断处理
+        for _ in 0..50000 {
+            core::hint::spin_loop();
+        }
 
-    //     // 等待中断处理
-    //     for _ in 0..5000 {
-    //         core::hint::spin_loop();
-    //     }
+        let (tx_count1, rx_count1, _) = get_interrupt_counts();
+        info!("After TX-only: TX={}, RX={}", tx_count1, rx_count1);
 
-    //     let (tx_count1, rx_count1, _) = get_interrupt_counts();
-    //     info!("After TX-only: TX={}, RX={}", tx_count1, rx_count1);
+        serial.disable_interrupts(InterruptMask::TX_EMPTY | InterruptMask::RX_AVAILABLE);
+        reset_interrupt_counters();
+        let mut rx = serial.take_rx().unwrap();
+        rx.clean_fifo();
 
-    //     serial.disable_interrupts(InterruptMask::TX_EMPTY | InterruptMask::RX_AVAILABLE);
-    //     reset_interrupt_counters();
-    //     let mut rx = serial.take_rx().unwrap();
-    //     rx.clean_fifo();
+        // 测试2：仅启用RX中断
+        info!("Test 2: Enable RX interrupt only");
+        serial.enable_interrupts(InterruptMask::RX_AVAILABLE);
+        serial.enable_loopback();
 
-    //     // 测试2：仅启用RX中断
-    //     info!("Test 2: Enable RX interrupt only");
-    //     serial.enable_interrupts(InterruptMask::RX_AVAILABLE);
+        let _ = tx.send(b"RX mask test");
 
-    //     let _ = tx.send(b"RX mask test");
+        // 等待中断处理
+        for _ in 0..50000 {
+            core::hint::spin_loop();
+        }
 
-    //     // 等待中断处理
-    //     for _ in 0..50000 {
-    //         core::hint::spin_loop();
-    //     }
+        let (tx_count2, rx_count2, _) = get_interrupt_counts();
+        serial.disable_loopback();
+        info!("After RX-only: TX={}, RX={}", tx_count2, rx_count2);
 
-    //     let (tx_count2, rx_count2, _) = get_interrupt_counts();
-    //     info!("After RX-only: TX={}, RX={}", tx_count2, rx_count2);
+        // 清理
+        serial.disable_interrupts(InterruptMask::TX_EMPTY | InterruptMask::RX_AVAILABLE);
+        rx.clean_fifo();
+        reset_interrupt_counters();
 
-    //     // 清理
-    //     serial.disable_interrupts(InterruptMask::TX_EMPTY | InterruptMask::RX_AVAILABLE);
-    //     rx.clean_fifo();
-    //     reset_interrupt_counters();
+        // 测试3：启用TX和RX中断
+        info!("Test 3: Enable both TX and RX interrupts");
+        serial.enable_interrupts(InterruptMask::TX_EMPTY | InterruptMask::RX_AVAILABLE);
+        serial.enable_loopback();
+        let _ = tx.send(b"Both mask test");
 
-    //     // 测试3：启用TX和RX中断
-    //     info!("Test 3: Enable both TX and RX interrupts");
-    //     serial.enable_interrupts(InterruptMask::TX_EMPTY | InterruptMask::RX_AVAILABLE);
+        // 等待数据通过回环传输到RX FIFO并触发中断
+        // 在读取数据之前让中断处理程序有机会检测到RX中断
+        for i in 0..80000 {
+            core::hint::spin_loop();
+        }
 
-    //     let _ = tx.send(b"Both mask test");
+        let (tx_count3, rx_count3, _) = get_interrupt_counts();
+        serial.disable_loopback();
+        info!("After both: TX={}, RX={}", tx_count3, rx_count3);
 
-    //     // 等待数据通过回环传输到RX FIFO并触发中断
-    //     // 在读取数据之前让中断处理程序有机会检测到RX中断
-    //     for i in 0..8000 {
-    //         if i % 2000 == 0 {
-    //             info!("Waiting for interrupts... {}", i);
-    //         }
-    //         core::hint::spin_loop();
-    //     }
+        // 验证掩码控制有效性
+        if tx_count1 > 0 && rx_count1 == 0 {
+            info!("✓ TX-only mask test passed");
+        } else {
+            panic!("✗ TX-only mask test failed");
+        }
 
-    //     let (tx_count3, rx_count3, _) = get_interrupt_counts();
-    //     info!("After both: TX={}, RX={}", tx_count3, rx_count3);
+        if tx_count2 == 0 && rx_count2 > 0 {
+            info!("✓ RX-only mask test passed");
+        } else {
+            panic!("✗ RX-only mask test failed");
+        }
 
-    //     // 验证掩码控制有效性
-    //     if tx_count1 > 0 && rx_count1 == 0 {
-    //         info!("✓ TX-only mask test passed");
-    //     } else {
-    //         panic!("✗ TX-only mask test failed");
-    //     }
+        if tx_count3 > 0 && rx_count3 > 0 {
+            info!("✓ Both interrupts mask test passed");
+        } else {
+            panic!("✗ Both interrupts mask test failed");
+        }
 
-    //     if tx_count2 == 0 && rx_count2 > 0 {
-    //         info!("✓ RX-only mask test passed");
-    //     } else {
-    //         panic!("✗ RX-only mask test failed");
-    //     }
+        // 最终清理
+        serial.disable_interrupts(InterruptMask::TX_EMPTY | InterruptMask::RX_AVAILABLE);
+        info!("✓ PL011 interrupt mask control test completed");
 
-    //     if tx_count3 > 0 && rx_count3 > 0 {
-    //         info!("✓ Both interrupts mask test passed");
-    //     } else {
-    //         panic!("✗ Both interrupts mask test failed");
-    //     }
-
-    //     // 最终清理
-    //     serial.disable_interrupts(InterruptMask::TX_EMPTY | InterruptMask::RX_AVAILABLE);
-    //     info!("✓ PL011 interrupt mask control test completed");
-
-    //     info!("=== Interrupt Mask Control Test Completed ===");
-    // }
+        info!("=== Interrupt Mask Control Test Completed ===");
+    }
     // /// Serial 资源管理测试 - 验证 RAII 和资源生命周期
     // #[test]
     // fn test_serial_resource_management() {
@@ -591,23 +589,52 @@ mod tests {
     ) -> Result<(), TransferError> {
         let mut rcv_buff = Vec::with_capacity(64);
         s.enable_loopback();
+        for _ in 0..10000 {
+            core::hint::spin_loop();
+        }
         // 尽量清空残留数据，避免与本次测试混淆
         rx.clean_fifo();
+        let mut retry = 0;
+        const RETRY: usize = 10000;
         let mut buff = [0u8; 1];
         for (i, b) in test_data.iter().enumerate() {
             // 发送一个字节
-            let sent = tx.send(&[*b]).unwrap();
-            if sent != 1 {
-                s.disable_loopback();
-                panic!("✗ Failed to send byte {}: sent {}", i, sent);
+            for _ in 0..RETRY {
+                match tx.send(&[*b]) {
+                    Ok(1) => break,
+                    Err(e) => {
+                        s.disable_loopback();
+                        panic!("Send error on byte {}: {:?}", i, e);
+                    }
+                    _ => {
+                        retry += 1;
+                        if retry >= RETRY {
+                            s.disable_loopback();
+                            panic!("Failed to send byte {} after {} retries", i, RETRY);
+                        }
+                    }
+                }
             }
-
+            retry = 0;
             // 接收一个字节
-            loop {
-                let n = rx.recive(&mut buff)?;
-                if n == 1 {
-                    rcv_buff.push(buff[0]);
-                    break;
+            for _ in 0..RETRY {
+                match rx.recive(&mut buff) {
+                    Ok(1) => {
+                        rcv_buff.push(buff[0]);
+                        break;
+                    }
+                    Ok(0) => {
+                        retry += 1;
+                        if retry >= RETRY {
+                            s.disable_loopback();
+                            panic!("Failed to receive byte {} after {} retries", i, RETRY);
+                        }
+                    }
+                    Err(e) => {
+                        s.disable_loopback();
+                        panic!("Receive error on byte {}: {:?}", i, e);
+                    }
+                    _ => {}
                 }
             }
         }
