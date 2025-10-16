@@ -8,23 +8,21 @@
 mod registers;
 
 use bitflags::Flags;
-use registers::*;
-
-#[cfg(target_arch = "x86_64")]
-pub mod pio;
-
-// MMIO 版本（通用）
-pub mod mmio;
-
 use heapless::Vec;
-#[cfg(target_arch = "x86_64")]
-pub use pio::*;
-
-pub use mmio::*;
 use rdif_serial::{
     Config, ConfigError, DataBits, InterruptMask, LineStatus, Parity, Register, Serial, StopBits,
     TransferError,
 };
+use registers::*;
+
+#[cfg(any(target_arch = "x86", target_arch = "x86_64"))]
+mod pio;
+// MMIO 版本（通用）
+mod mmio;
+
+pub use mmio::*;
+#[cfg(any(target_arch = "x86", target_arch = "x86_64"))]
+pub use pio::*;
 
 pub trait Kind: Send + Sync + 'static {
     fn read_reg(&self, reg: u8) -> u8;

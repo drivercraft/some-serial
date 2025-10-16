@@ -19,9 +19,7 @@ mod tests {
         ptr::NonNull,
         sync::atomic::{AtomicBool, AtomicUsize, Ordering},
     };
-    use rdif_serial::{
-        BIrqHandler, BReciever, BSender, BSerial, Interface as _, Register, TransferError,
-    };
+    use rdif_serial::{BIrqHandler, BReciever, BSender, BSerial, Interface as _, TransferError};
 
     use super::*;
     use bare_test::{
@@ -330,8 +328,7 @@ mod tests {
 
         let mut uart: BSerial = match uart_info.driver_type {
             UartDriverType::PL011 => {
-                let mut uart = some_serial::pl011::Pl011::new(uart_info.base, uart_info.clk);
-
+                let uart = some_serial::pl011::Pl011::new(uart_info.base, uart_info.clk);
                 Box::new(uart)
             }
             UartDriverType::Ns16550Mmio => {

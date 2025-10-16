@@ -2,7 +2,7 @@
 
 [![Crates.io](https://img.shields.io/crates/v/some-serial.svg)](https://crates.io/crates/some-serial)
 [![Documentation](https://docs.rs/some-serial/badge.svg)](https://docs.rs/some-serial)
-[![Build Status](https://github.com/username/some-serial/workflows/CI/badge.svg)](https://github.com/username/some-serial/actions)
+[![Test CI](https://github.com/drivercraft/some-serial/actions/workflows/test.yml/badge.svg)](https://github.com/drivercraft/some-serial/actions/workflows/test.yml)
 [![License](https://img.shields.io/badge/license-MIT%2FApache--2.0-blue.svg)](LICENSE)
 
 一个为嵌入式和裸机环境设计的 **统一串口驱动集合**，提供多种常见串口硬件的高性能、可靠驱动实现。
@@ -43,11 +43,16 @@
   - 支持 FIFO、中断、回环等完整功能
   - 适用于树莓派、STM32 等 ARM 平台
 
+- ✅ **NS16550/16450 UART** - 经典串口控制器系列
+  - **NS16550Mmio** - 内存映射 I/O 版本（通用嵌入式平台）
+  - **NS16550Pio** - 端口 I/O 版本（x86_64 架构）
+  - 支持 16 字节 FIFO 缓冲和中断驱动
+  - 广泛兼容 PC 兼容串口设备和嵌入式系统
+
 ### 计划支持
 
-- 🚧 **16550 UART** - 经典 PC 串口控制器
-- 🚧 **NS16550A** - 改进型 16550，广泛兼容
-- 🚧 **8250 UART** - 传统 8250/16450 系列
+- 🚧 **更多 ARM UART 驱动** - 扩展 ARM 平台支持
+- 🚧 **RISC-V 平台适配** - 支持 RISC-V 嵌入式系统
 
 ## 🚀 快速开始
 
@@ -67,16 +72,31 @@ some-serial = "0.1.0"
 ```rust
 use core::ptr::NonNull;
 use some_serial::{Serial, Config};
-use some_serial::pl011::Pl011; // 当前支持 PL011
 
-// 创建串口实例（以 PL011 为例）
+// 根据平台选择合适的驱动
+#[cfg(target_arch = "aarch64")]
+use some_serial::pl011::Pl011;
+
+#[cfg(not(target_arch = "aarch64"))]
+use some_serial::ns16550::Ns16550Mmio;
+
+// 创建串口实例
 let base_addr = 0x9000000 as *mut u8; // 你的 UART 基地址
-let clock_freq = 24_000_000; // 24MHz 时钟频率
+let clock_freq = match target_arch {
+    "aarch64" => 24_000_000, // ARM PL011: 24MHz
+    _ => 1_843_200,          // NS16550: 1.8432MHz
+};
 
-let mut uart = Pl011::new(
-    NonNull::new(base_addr).unwrap(),
-    clock_freq
-);
+let mut uart = match target_arch {
+    "aarch64" => Pl011::new(
+        NonNull::new(base_addr).unwrap(),
+        clock_freq
+    ),
+    _ => Ns16550Mmio::new(
+        NonNull::new(base_addr).unwrap(),
+        clock_freq
+    ),
+};
 
 // 统一配置接口
 let config = Config::new()
@@ -107,21 +127,50 @@ println!("Received {} bytes: {:?}", received, &buffer[..received]);
 
 ### 驱动选择示例
 
-未来支持多种驱动时，你可以根据硬件选择：
+根据硬件平台和访问方式选择合适的驱动：
 
 ```rust
-// 未来示例 - 根据硬件平台选择驱动
-#[cfg(feature = "pl011")]
+// ARM 平台 - 使用 PL011
+#[cfg(target_arch = "aarch64")]
 use some_serial::pl011::Pl011;
 
-#[cfg(feature = "stm32-usart")]
-use some_serial::stm32_usart::Stm32Usart;
+// x86_64 平台 - 使用端口 I/O
+#[cfg(target_arch = "x86_64")]
+use some_serial::ns16550::Ns16550Pio;
 
-#[cfg(feature = "esp32-uart")]
-use some_serial::esp32_uart::Esp32Uart;
+// 其他嵌入式平台 - 使用内存映射 I/O
+#[cfg(not(any(target_arch = "aarch64", target_arch = "x86_64")))]
+use some_serial::ns16550::Ns16550Mmio;
+
+// 平台特定的创建函数
+fn create_uart_for_platform(base_addr: *mut u8, clock_freq: u32) -> Box<dyn Serial> {
+    #[cfg(target_arch = "aarch64")]
+    {
+        Box::new(Pl011::new(
+            NonNull::new(base_addr).unwrap(),
+            clock_freq
+        ))
+    }
+
+    #[cfg(target_arch = "x86_64")]
+    {
+        Box::new(Ns16550Pio::new(
+            NonNull::new(base_addr).unwrap(),
+            clock_freq
+        ))
+    }
+
+    #[cfg(not(any(target_arch = "aarch64", target_arch = "x86_64")))]
+    {
+        Box::new(Ns16550Mmio::new(
+            NonNull::new(base_addr).unwrap(),
+            clock_freq
+        ))
+    }
+}
 
 // 统一的创建和使用方式
-let mut uart = create_uart_for_platform(); // 平台特定的创建函数
+let mut uart = create_uart_for_platform(base_addr, clock_freq);
 // ... 后续使用方式完全相同
 ```
 
@@ -152,23 +201,73 @@ let irq_handler = uart.irq_handler().unwrap();
 
 ```rust
 // 运行时平台检测示例
-fn create_serial_for_platform() -> Box<dyn Serial> {
+fn create_serial_for_platform(base_addr: *mut u8, clock_freq: u32) -> Box<dyn Serial> {
     #[cfg(target_arch = "aarch64")]
     {
-        // ARM64 平台，通常使用 PL011
+        // ARM64 平台，使用 PL011
         Box::new(Pl011::new(
-            NonNull::new(0x9000000 as *mut u8).unwrap(),
-            24_000_000
+            NonNull::new(base_addr).unwrap(),
+            clock_freq
         ))
     }
 
-     
+    #[cfg(target_arch = "x86_64")]
     {
-        // x86_64 测试环境
-        Box::new(create_test_uart())
+        // x86_64 平台，使用 NS16550 端口 I/O
+        Box::new(Ns16550Pio::new(
+            NonNull::new(base_addr).unwrap(),
+            clock_freq
+        ))
     }
 
-    // 其他平台...
+    #[cfg(not(any(target_arch = "aarch64", target_arch = "x86_64")))]
+    {
+        // 其他嵌入式平台，使用 NS16550 内存映射 I/O
+        Box::new(Ns16550Mmio::new(
+            NonNull::new(base_addr).unwrap(),
+            clock_freq
+        ))
+    }
+}
+
+// 系统集成示例
+fn init_system_uart() -> Result<Box<dyn Serial>, &'static str> {
+    let (base_addr, clock_freq) = get_platform_uart_config()?;
+
+    let mut uart = create_serial_for_platform(base_addr, clock_freq);
+
+    // 标准配置
+    let config = Config::new()
+        .baudrate(115200)
+        .data_bits(DataBits::Eight)
+        .stop_bits(StopBits::One)
+        .parity(Parity::None);
+
+    uart.set_config(&config).map_err(|_| "Failed to configure UART")?;
+    uart.open().map_err(|_| "Failed to open UART")?;
+
+    Ok(uart)
+}
+
+// 平台特定配置获取
+fn get_platform_uart_config() -> Result<(*mut u8, u32), &'static str> {
+    #[cfg(target_arch = "aarch64")]
+    {
+        // ARM 平台常见配置
+        Ok((0x9000000 as *mut u8, 24_000_000))
+    }
+
+    #[cfg(target_arch = "x86_64")]
+    {
+        // x86 平台常见配置
+        Ok((0x3F8 as *mut u8, 1_843_200))
+    }
+
+    #[cfg(not(any(target_arch = "aarch64", target_arch = "x86_64")))]
+    {
+        // 默认嵌入式配置
+        Ok((0x40000000 as *mut u8, 16_000_000))
+    }
 }
 ```
 
@@ -300,15 +399,20 @@ impl NewDriver {
 
 - ✨ 初始发布 - 嵌入式串口驱动集合
 - ✅ 完整的 ARM PL011 UART 支持
+- ✅ **新增 NS16550/16450 UART 驱动支持**
+  - ✅ NS16550Mmio - 内存映射 I/O 版本
+  - ✅ NS16550Pio - 端口 I/O 版本（x86_64）
+  - ✅ 支持 FIFO、中断、回环等完整功能
 - ✅ 基于 rdif-serial 的统一接口抽象
 - ✅ 中断驱动通信和 FIFO 功能
 - ✅ 全面测试套件和文档
-- 🏗️ 模块化架构，为多驱动支持奠定基础
+- ✅ **性能优化和类型安全改进**
+- 🏗️ 模块化架构，支持多平台驱动选择
 
 ### 未来计划
 
-- 🎯 添加 16550/NS16550A 驱动支持
-- 🎯 支持 RISC-V 平台
-- 🎯 性能优化和更多功能特性
+- 🎯 扩展更多 ARM UART 驱动支持
+- 🎯 RISC-V 平台适配
+- 🎯 更多性能优化和功能特性
 
 ---
