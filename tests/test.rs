@@ -15,6 +15,7 @@ mod tests {
     };
     use bare_test::irq::{IrqHandleResult, IrqParam};
     use core::{
+        cell::UnsafeCell,
         fmt::Debug,
         ptr::NonNull,
         sync::atomic::{AtomicBool, AtomicUsize, Ordering},
@@ -148,7 +149,12 @@ mod tests {
         info!("Test 1: Enable TX interrupt only");
         serial.enable_interrupts(InterruptMask::TX_EMPTY);
         let mut tx = serial.take_tx().unwrap();
-        let _ = tx.send(b"TX mask test");
+
+        let mut bytes = b"TX mask test".as_slice();
+        while !bytes.is_empty() {
+            let n = tx.send(bytes).unwrap();
+            bytes = &bytes[n..];
+        }
 
         // 等待中断处理
         for _ in 0..50000 {
@@ -156,6 +162,7 @@ mod tests {
         }
 
         let (tx_count1, rx_count1, _) = get_interrupt_counts();
+        serial.disable_loopback();
         info!("After TX-only: TX={}, RX={}", tx_count1, rx_count1);
 
         serial.disable_interrupts(InterruptMask::TX_EMPTY | InterruptMask::RX_AVAILABLE);
@@ -165,19 +172,35 @@ mod tests {
 
         // 测试2：仅启用RX中断
         info!("Test 2: Enable RX interrupt only");
+        let mut bytes = b"TX mask test".as_slice();
+        info!("Sending data: {:?}", bytes);
+
         serial.enable_interrupts(InterruptMask::RX_AVAILABLE);
         serial.enable_loopback();
 
-        let _ = tx.send(b"RX mask test");
+        let n = bytes.len();
+
+        while !bytes.is_empty() {
+            let n = tx.send(bytes).unwrap();
+            bytes = &bytes[n..];
+        }
 
         // 等待中断处理
         for _ in 0..50000 {
             core::hint::spin_loop();
         }
 
+        let mut buff = vec![0u8; n];
+
+        let rn = rx.recive(&mut buff).unwrap();
+
         let (tx_count2, rx_count2, _) = get_interrupt_counts();
         serial.disable_loopback();
-        info!("After RX-only: TX={}, RX={}", tx_count2, rx_count2);
+        info!(
+            "After RX-only: TX={}, RX={}, send {}",
+            tx_count2, rx_count2, n
+        );
+        info!("Received data: {:?}", &buff[..rn]);
 
         // 清理
         serial.disable_interrupts(InterruptMask::TX_EMPTY | InterruptMask::RX_AVAILABLE);
@@ -690,8 +713,17 @@ mod tests {
         }
     }
 
+    struct HWIrqHandler(UnsafeCell<Option<BIrqHandler>>);
+    unsafe impl Sync for HWIrqHandler {}
+    unsafe impl Send for HWIrqHandler {}
+
     fn register_irq(irq: &IrqInfo, handler: BIrqHandler) {
         static IRQ_REGISTED: AtomicBool = AtomicBool::new(false);
+        static IRQ_HANDLER: HWIrqHandler = HWIrqHandler(UnsafeCell::new(None));
+        unsafe {
+            *IRQ_HANDLER.0.get() = Some(handler);
+        }
+
         if IRQ_REGISTED
             .compare_exchange(
                 false,
@@ -710,7 +742,12 @@ mod tests {
                 IRQ_HANDLER_CALL_COUNT.fetch_add(1, Ordering::SeqCst);
 
                 // 清除中断状态并获取触发类型
-                let status = handler.clean_interrupt_status();
+                let status = unsafe {
+                    (*IRQ_HANDLER.0.get())
+                        .as_mut()
+                        .unwrap()
+                        .clean_interrupt_status()
+                };
 
                 // 根据中断类型增加相应计数器
                 if status.contains(InterruptMask::TX_EMPTY) {
