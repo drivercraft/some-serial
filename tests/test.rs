@@ -360,6 +360,8 @@ mod tests {
             }
         };
 
+        uart.open().expect("Failed to initialize UART");
+
         if let Some(handler) = uart.irq_handler() {
             register_irq(&uart_info.irq, handler);
         }
@@ -718,6 +720,8 @@ mod tests {
     unsafe impl Send for HWIrqHandler {}
 
     fn register_irq(irq: &IrqInfo, handler: BIrqHandler) {
+        info!("Registering IRQ for UART: {:?}", irq);
+
         static IRQ_REGISTED: AtomicBool = AtomicBool::new(false);
         static IRQ_HANDLER: HWIrqHandler = HWIrqHandler(UnsafeCell::new(None));
         unsafe {
@@ -733,6 +737,7 @@ mod tests {
             )
             .is_ok()
         {
+            info!("✓ IRQ not registered yet, proceeding with registration");
             IrqParam {
                 intc: irq.irq_parent,
                 cfg: irq.cfgs[0].clone(),

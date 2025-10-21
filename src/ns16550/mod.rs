@@ -8,8 +8,7 @@
 mod registers;
 
 use bitflags::Flags;
-use heapless::{deque::DequeView, Deque, Vec};
-use log::info;
+use heapless::Deque;
 use rdif_serial::{
     Config, ConfigError, DataBits, InterruptMask, LineStatus, Parity, Register, Serial, StopBits,
     TransferError,
