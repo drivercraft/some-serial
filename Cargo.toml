@@ -9,7 +9,7 @@ keywords = ["serial", "uart", "embedded", "bare-metal"]
 license = "MIT OR Apache-2.0"
 name = "some-serial"
 repository = "https://github.com/drivercraft/some-serial"
-version = "0.2.1"
+version = "0.2.2"
 
 [dependencies]
 bitflags = "2.8"
