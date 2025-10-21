@@ -417,8 +417,9 @@ impl<T: Kind> Register for Ns16550<T> {
             let mut ier: InterruptEnableFlags = self.read_flags(UART_IER);
             ier.remove(InterruptEnableFlags::TRANSMITTER_HOLDING_EMPTY);
             self.write_flags(UART_IER, ier);
-
-            mask |= InterruptMask::TX_EMPTY;
+            if self.is_tx_empty_int_enabled {
+                mask |= InterruptMask::TX_EMPTY;
+            }
         }
         if iir.contains(InterruptIdentificationFlags::MODEM_STATUS) {
             // Modem 状态中断，读取 MSR 清除
