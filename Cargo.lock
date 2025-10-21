@@ -53,7 +53,7 @@ version = "0.2.12"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "4ce5f140efb4e707ea8f8e894d5f710500e373be1c4435d56b28d1fd1f843341"
 dependencies = [
- "bitflags 2.9.4",
+ "bitflags 2.10.0",
  "cfg-if",
  "embedded-hal-nb",
  "fdt-parser",
@@ -73,7 +73,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "f251a1a74133f802b55eaf5e340107b0024457aa9b2ac3c72074501bfa8509a5"
 dependencies = [
  "aarch64-cpu",
- "bitflags 2.9.4",
+ "bitflags 2.10.0",
  "enum_dispatch",
  "log",
  "paste",
@@ -180,9 +180,9 @@ checksum = "bef38d45163c2f1dde094a7dfd33ccf595c92905c8f8f4fdc18d06fb1037718a"
 
 [[package]]
 name = "bitflags"
-version = "2.9.4"
+version = "2.10.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "2261d10cca569e4643e526d8dc2e62e433cc8aba21ab764233731f8d369bf394"
+checksum = "812e12b5285cc515a9c72a5c1d3b6d46a19dac5acfef5265968c166106e31dd3"
 
 [[package]]
 name = "buddy_system_allocator"
@@ -1061,7 +1061,7 @@ version = "0.1.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "7166660a78a4488f5f3269206242d3b76cd6b42d870f004898487ce16dba3f69"
 dependencies = [
- "bitflags 2.9.4",
+ "bitflags 2.10.0",
  "prettyplease",
  "quote",
  "syn",
@@ -1117,7 +1117,7 @@ version = "0.1.10"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "416f7e718bdb06000964960ffa43b4335ad4012ae8b99060261aa4a8088d5ccb"
 dependencies = [
- "bitflags 2.9.4",
+ "bitflags 2.10.0",
  "libc",
  "redox_syscall",
 ]
@@ -1250,7 +1250,7 @@ version = "0.10.74"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "24ad14dd45412269e1a30f52ad8f0664f0f4f4a89ee8fe28c3b3527021ebb654"
 dependencies = [
- "bitflags 2.9.4",
+ "bitflags 2.10.0",
  "cfg-if",
  "foreign-types",
  "libc",
@@ -1303,7 +1303,7 @@ version = "0.6.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "4a302d085e35d9edfa3ec531475ed95eae8a92e7e47ce7a15bd4e9c5e74f7526"
 dependencies = [
- "bitflags 2.9.4",
+ "bitflags 2.10.0",
  "log",
  "num-align",
  "thiserror 2.0.17",
@@ -1351,7 +1351,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "c4325c6aa3cca3373503b1527e75756f9fbfe5fd76be4b4c8a143ee47430b8e0"
 dependencies = [
  "bit_field",
- "bitflags 2.9.4",
+ "bitflags 2.10.0",
 ]
 
 [[package]]
@@ -1362,7 +1362,7 @@ checksum = "225c81c0f672afbdd95e55abebe56541870e64e350eba9f7eabfb392112229ab"
 dependencies = [
  "bare-test-macros",
  "bit_field",
- "bitflags 2.9.4",
+ "bitflags 2.10.0",
  "log",
  "pci_types",
  "rdif-pcie",
@@ -1393,7 +1393,7 @@ dependencies = [
  "aarch64-cpu",
  "aarch64-cpu-ext",
  "any-uart",
- "bitflags 2.9.4",
+ "bitflags 2.10.0",
  "fdt-parser",
  "kasm-aarch64",
  "kdef-pgtable",
@@ -1583,11 +1583,11 @@ dependencies = [
 
 [[package]]
 name = "rdif-serial"
-version = "0.5.3"
+version = "0.5.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "cffb8a19d511ac2fbafbcbfd31c92d7dd5f641e47e069317d733c3984b946b8c"
+checksum = "d68d515cc651b11ef2c323914f64627c5341af83049881f567f9879ec3b86b8f"
 dependencies = [
- "bitflags 2.9.4",
+ "bitflags 2.10.0",
  "futures",
  "mbarrier",
  "rdif-base",
@@ -1649,7 +1649,7 @@ version = "0.5.18"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "ed2bf2547551a7053d6fdfafda3f938979645c44812fbfcda098faae3f1a362d"
 dependencies = [
- "bitflags 2.9.4",
+ "bitflags 2.10.0",
 ]
 
 [[package]]
@@ -1789,7 +1789,7 @@ version = "1.1.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "cd15f8a2c5551a84d56efdc1cd049089e409ac19a3072d5037a17fd70719ff3e"
 dependencies = [
- "bitflags 2.9.4",
+ "bitflags 2.10.0",
  "errno",
  "libc",
  "linux-raw-sys",
@@ -1871,7 +1871,7 @@ version = "2.11.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "897b2245f0b511c87893af39b033e5ca9cce68824c4d7e7630b5a1d339658d02"
 dependencies = [
- "bitflags 2.9.4",
+ "bitflags 2.10.0",
  "core-foundation",
  "core-foundation-sys",
  "libc",
@@ -2057,11 +2057,11 @@ dependencies = [
 
 [[package]]
 name = "some-serial"
-version = "0.2.2"
+version = "0.2.3"
 dependencies = [
  "bare-test",
  "bare-test-macros",
- "bitflags 2.9.4",
+ "bitflags 2.10.0",
  "dma-api",
  "heapless 0.9.1",
  "log",
@@ -2112,7 +2112,7 @@ dependencies = [
  "ansi_rgb",
  "anyhow",
  "arrayvec",
- "bitflags 2.9.4",
+ "bitflags 2.10.0",
  "buddy_system_allocator",
  "byte-unit",
  "dma-api",
@@ -2268,7 +2268,7 @@ version = "0.6.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "3c879d448e9d986b661742763247d3693ed13609438cf3d006f51f5368a5ba6b"
 dependencies = [
- "bitflags 2.9.4",
+ "bitflags 2.10.0",
  "core-foundation",
  "system-configuration-sys 0.6.0",
 ]
@@ -2541,7 +2541,7 @@ version = "0.6.6"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "adc82fd73de2a9722ac5da747f12383d2bfdb93591ee6c58486e0097890f05f2"
 dependencies = [
- "bitflags 2.9.4",
+ "bitflags 2.10.0",
  "bytes",
  "futures-util",
  "http 1.3.1",
@@ -3096,7 +3096,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "0f042214de98141e9c8706e8192b73f56494087cc55ebec28ce10f26c5c364ae"
 dependencies = [
  "bit_field",
- "bitflags 2.9.4",
+ "bitflags 2.10.0",
  "rustversion",
  "volatile",
 ]

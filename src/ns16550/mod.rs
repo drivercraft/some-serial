@@ -264,7 +264,10 @@ impl<T: Kind> Register for Ns16550<T> {
         if let Some(e) = self.err.take() {
             return Err(e);
         }
-        Ok(self.rcv_fifo.pop_front().unwrap())
+        Ok(self
+            .rcv_fifo
+            .pop_front()
+            .expect("should check line status first"))
     }
 
     fn set_config(&mut self, config: &Config) -> Result<(), ConfigError> {
@@ -373,45 +376,55 @@ impl<T: Kind> Register for Ns16550<T> {
             return mask;
         }
 
-        if iir.contains(InterruptIdentificationFlags::RECEIVER_LINE_STATUS) {
+        // 获取中断ID（需要提取bit 1-3）
+        let interrupt_id = iir & InterruptIdentificationFlags::INTERRUPT_ID_MASK;
+
+        // 使用精确匹配而不是 contains
+        if interrupt_id == InterruptIdentificationFlags::RECEIVER_LINE_STATUS {
+            // 接收线路状态错误中断
             let lsr: LineStatusFlags = self.read_flags(UART_LSR);
 
-            mask |= InterruptMask::RX_AVAILABLE;
             // 读取 RBR 以清除错误状态（即使有错误也需要读取）
             let d = self.read_reg_u8(UART_RBR);
 
             // 按优先级检查错误（从高到低）
             if lsr.contains(LineStatusFlags::OVERRUN_ERROR) {
                 self.err = Some(TransferError::Overrun(d));
+                mask |= InterruptMask::RX_AVAILABLE;
             } else if lsr.contains(LineStatusFlags::PARITY_ERROR) {
                 self.err = Some(TransferError::Parity);
+                mask |= InterruptMask::RX_AVAILABLE;
             } else if lsr.contains(LineStatusFlags::FRAMING_ERROR) {
                 self.err = Some(TransferError::Framing);
+                mask |= InterruptMask::RX_AVAILABLE;
             } else if lsr.contains(LineStatusFlags::BREAK_INTERRUPT) {
                 self.err = Some(TransferError::Break);
+                mask |= InterruptMask::RX_AVAILABLE;
+            } else if lsr.contains(LineStatusFlags::DATA_READY) {
+                // 没有错误，保存数据到 FIFO
+                if self.rcv_fifo.push_back(d).is_err() {
+                    self.err = Some(TransferError::Overrun(d));
+                }
+                mask |= InterruptMask::RX_AVAILABLE;
             }
-        } else if iir.contains(InterruptIdentificationFlags::CHARACTER_TIMEOUT)
-            | iir.contains(InterruptIdentificationFlags::RECEIVED_DATA_AVAILABLE)
+        } else if interrupt_id == InterruptIdentificationFlags::RECEIVED_DATA_AVAILABLE
+            || interrupt_id == InterruptIdentificationFlags::CHARACTER_TIMEOUT
         {
-            // 接收数据可用中断
+            // 接收数据可用中断或字符超时中断
             mask |= InterruptMask::RX_AVAILABLE;
-            let d = self.read_reg_u8(UART_RBR);
-            if self.rcv_fifo.push_back(d).is_err() {
-                self.err = Some(TransferError::Overrun(d));
-            } else {
-                while self
-                    .read_flags::<LineStatusFlags>(UART_LSR)
-                    .contains(LineStatusFlags::DATA_READY)
-                {
-                    let d = self.read_reg_u8(UART_RBR);
-                    if self.rcv_fifo.push_back(d).is_err() {
-                        self.err = Some(TransferError::Overrun(d));
-                        break;
-                    }
+
+            // 读取所有可用数据
+            while self
+                .read_flags::<LineStatusFlags>(UART_LSR)
+                .contains(LineStatusFlags::DATA_READY)
+            {
+                let d = self.read_reg_u8(UART_RBR);
+                if self.rcv_fifo.push_back(d).is_err() {
+                    self.err = Some(TransferError::Overrun(d));
+                    break;
                 }
             }
-        }
-        if iir.contains(InterruptIdentificationFlags::TRANSMITTER_HOLDING_EMPTY) {
+        } else if interrupt_id == InterruptIdentificationFlags::TRANSMITTER_HOLDING_EMPTY {
             // 发送保持寄存器空中断
             // 关闭 THRI 使能位，避免持续触发中断
             // 用户在 write_byte 时会重新启用
@@ -421,8 +434,7 @@ impl<T: Kind> Register for Ns16550<T> {
             if self.is_tx_empty_int_enabled {
                 mask |= InterruptMask::TX_EMPTY;
             }
-        }
-        if iir.contains(InterruptIdentificationFlags::MODEM_STATUS) {
+        } else if interrupt_id == InterruptIdentificationFlags::MODEM_STATUS {
             // Modem 状态中断，读取 MSR 清除
             let _ = self.read_flags::<ModemStatusFlags>(UART_MSR);
         }
@@ -433,16 +445,33 @@ impl<T: Kind> Register for Ns16550<T> {
     fn line_status(&mut self) -> LineStatus {
         let lsr: LineStatusFlags = self.read_flags(UART_LSR);
         let mut status = LineStatus::empty();
-
-        if lsr.contains(LineStatusFlags::DATA_READY) {
-            let _ = self.rcv_fifo.push_back(self.read_reg_u8(UART_RBR));
+        if self.err.is_some() {
+            status |= LineStatus::DATA_READY;
         }
+
         if lsr.contains(LineStatusFlags::TRANSMITTER_HOLDING_EMPTY) {
             status |= LineStatus::TX_HOLDING_EMPTY;
         }
-        if !self.rcv_fifo.is_empty() {
-            status |= LineStatus::DATA_READY;
+
+        if self
+            .read_flags::<InterruptEnableFlags>(UART_IER)
+            .contains(InterruptEnableFlags::RECEIVED_DATA_AVAILABLE)
+        {
+            // 检查 FIFO 中是否有数据
+            if !self.rcv_fifo.is_empty() {
+                status |= LineStatus::DATA_READY;
+            }
+        } else {
+            // 如果未启用接收中断，则直接检查 LSR 的 DATA_READY 位
+            if lsr.contains(LineStatusFlags::DATA_READY) {
+                let b = self.read_reg_u8(UART_RBR);
+                if self.rcv_fifo.push_back(b).is_err() {
+                    self.err = Some(TransferError::Overrun(b));
+                }
+                status |= LineStatus::DATA_READY;
+            }
         }
+
         status
     }
 
