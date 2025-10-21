@@ -261,14 +261,10 @@ impl<T: Kind> Register for Ns16550<T> {
     }
 
     fn read_byte(&mut self) -> Result<u8, TransferError> {
-        if let Some(b) = self.rcv_fifo.pop() {
-            return Ok(b);
-        }
         if let Some(e) = self.err.take() {
             return Err(e);
         }
-        // 读取数据
-        Ok(self.read_reg_u8(UART_RBR))
+        Ok(self.rcv_fifo.pop().unwrap())
     }
 
     fn set_config(&mut self, config: &Config) -> Result<(), ConfigError> {
@@ -431,12 +427,14 @@ impl<T: Kind> Register for Ns16550<T> {
         let mut status = LineStatus::empty();
 
         if lsr.contains(LineStatusFlags::DATA_READY) {
-            status |= LineStatus::DATA_READY;
+            self.rcv_fifo.push(self.read_reg_u8(UART_RBR)).ok();
         }
         if lsr.contains(LineStatusFlags::TRANSMITTER_HOLDING_EMPTY) {
             status |= LineStatus::TX_HOLDING_EMPTY;
         }
-
+        if !self.rcv_fifo.is_empty() {
+            status |= LineStatus::DATA_READY;
+        }
         status
     }
 
