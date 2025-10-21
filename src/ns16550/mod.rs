@@ -37,8 +37,8 @@ pub struct Ns16550<T: Kind> {
     rcv_fifo: Deque<u8, 64>,
     base: T,
     clock_freq: u32,
-    err: Option<TransferError>,
     is_tx_empty_int_enabled: bool,
+    err: Option<TransferError>,
 }
 
 impl<T: Kind> Ns16550<T> {
@@ -47,8 +47,8 @@ impl<T: Kind> Ns16550<T> {
             rcv_fifo: Deque::new(),
             base,
             clock_freq,
-            err: None,
             is_tx_empty_int_enabled: false,
+            err: None,
         })
     }
 
@@ -261,9 +261,9 @@ impl<T: Kind> Register for Ns16550<T> {
     }
 
     fn read_byte(&mut self) -> Result<u8, TransferError> {
-        // if let Some(e) = self.err.take() {
-        //     return Err(e);
-        // }
+        if let Some(e) = self.err.take() {
+            return Err(e);
+        }
         Ok(self.rcv_fifo.pop_front().unwrap())
     }
 
@@ -373,10 +373,7 @@ impl<T: Kind> Register for Ns16550<T> {
             return mask;
         }
 
-        if iir.contains(InterruptIdentificationFlags::RECEIVER_LINE_STATUS)
-            | iir.contains(InterruptIdentificationFlags::CHARACTER_TIMEOUT)
-            | iir.contains(InterruptIdentificationFlags::RECEIVED_DATA_AVAILABLE)
-        {
+        if iir.contains(InterruptIdentificationFlags::RECEIVER_LINE_STATUS) {
             let lsr: LineStatusFlags = self.read_flags(UART_LSR);
 
             mask |= InterruptMask::RX_AVAILABLE;
@@ -393,20 +390,24 @@ impl<T: Kind> Register for Ns16550<T> {
             } else if lsr.contains(LineStatusFlags::BREAK_INTERRUPT) {
                 self.err = Some(TransferError::Break);
             }
-
-            // 接收中断/超时中断，读取 RBR 清除
-            if lsr.contains(LineStatusFlags::DATA_READY) && self.rcv_fifo.push_back(d).is_err() {
+        } else if iir.contains(InterruptIdentificationFlags::CHARACTER_TIMEOUT)
+            | iir.contains(InterruptIdentificationFlags::RECEIVED_DATA_AVAILABLE)
+        {
+            // 接收数据可用中断
+            mask |= InterruptMask::RX_AVAILABLE;
+            let d = self.read_reg_u8(UART_RBR);
+            if self.rcv_fifo.push_back(d).is_err() {
                 self.err = Some(TransferError::Overrun(d));
-            }
-
-            while self
-                .read_flags::<LineStatusFlags>(UART_LSR)
-                .contains(LineStatusFlags::DATA_READY)
-            {
-                let d = self.read_reg_u8(UART_RBR);
-                if self.rcv_fifo.push_back(d).is_err() {
-                    self.err = Some(TransferError::Overrun(d));
-                    break;
+            } else {
+                while self
+                    .read_flags::<LineStatusFlags>(UART_LSR)
+                    .contains(LineStatusFlags::DATA_READY)
+                {
+                    let d = self.read_reg_u8(UART_RBR);
+                    if self.rcv_fifo.push_back(d).is_err() {
+                        self.err = Some(TransferError::Overrun(d));
+                        break;
+                    }
                 }
             }
         }

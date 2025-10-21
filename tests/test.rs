@@ -190,7 +190,7 @@ mod tests {
             core::hint::spin_loop();
         }
 
-        let mut buff = vec![0u8; n];
+        let mut buff = vec![0u8; n + 20];
 
         let rn = rx.recive(&mut buff).unwrap();
 
