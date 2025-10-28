@@ -453,23 +453,21 @@ impl<T: Kind> Register for Ns16550<T> {
             status |= LineStatus::TX_HOLDING_EMPTY;
         }
 
-        if self
+        if !self
             .read_flags::<InterruptEnableFlags>(UART_IER)
             .contains(InterruptEnableFlags::RECEIVED_DATA_AVAILABLE)
         {
-            // 检查 FIFO 中是否有数据
-            if !self.rcv_fifo.is_empty() {
-                status |= LineStatus::DATA_READY;
-            }
-        } else {
             // 如果未启用接收中断，则直接检查 LSR 的 DATA_READY 位
             if lsr.contains(LineStatusFlags::DATA_READY) {
                 let b = self.read_reg_u8(UART_RBR);
                 if self.rcv_fifo.push_back(b).is_err() {
                     self.err = Some(TransferError::Overrun(b));
                 }
-                status |= LineStatus::DATA_READY;
             }
+        }
+        // 检查 FIFO 中是否有数据
+        if !self.rcv_fifo.is_empty() {
+            status |= LineStatus::DATA_READY;
         }
 
         status
