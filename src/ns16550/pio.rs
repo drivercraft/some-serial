@@ -36,4 +36,8 @@ impl Ns16550<Port> {
     pub fn new_port(port: u16, clock_freq: u32) -> Ns16550<Port> {
         Ns16550::new(Port { port }, clock_freq)
     }
+
+    pub fn new_port_boxed(port: u16, clock_freq: u32) -> rdif_serial::BSerial {
+        rdif_serial::SerialDyn::new_boxed(Ns16550::new_port(port, clock_freq))
+    }
 }

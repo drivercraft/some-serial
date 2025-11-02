@@ -321,7 +321,6 @@ pub const UART_LCR: u8 = 0x03;
 pub const UART_MCR: u8 = 0x04;
 
 /// UART_LSR: 线路状态寄存器 (Line Status Register)
-/// 只读，反映收发状态和错误，读取可清除部分错误中断。
 pub const UART_LSR: u8 = 0x05;
 
 /// UART_MSR: 调制解调器状态寄存器 (Modem Status Register)

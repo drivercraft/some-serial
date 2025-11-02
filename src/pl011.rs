@@ -349,31 +349,31 @@ pub struct Pl011Reciever {
 }
 
 impl TReciever for Pl011Reciever {
-    fn read_byte(&mut self) -> Result<Option<u8>, TransferError> {
+    fn read_byte(&mut self) -> Option<Result<u8, TransferError>> {
         if self.base.registers().uartfr.is_set(UARTFR::RXFE) {
-            return Ok(None);
+            return None;
         }
 
         let dr = self.base.registers().uartdr.extract();
         let data = dr.read(UARTDR::DATA) as u8;
 
         if dr.is_set(UARTDR::FE) {
-            return Err(TransferError::Framing);
+            return Some(Err(TransferError::Framing));
         }
 
         if dr.is_set(UARTDR::PE) {
-            return Err(TransferError::Parity);
+            return Some(Err(TransferError::Parity));
         }
 
         if dr.is_set(UARTDR::OE) {
-            return Err(TransferError::Overrun(data));
+            return Some(Err(TransferError::Overrun(data)));
         }
 
         if dr.is_set(UARTDR::BE) {
-            return Err(TransferError::Break);
+            return Some(Err(TransferError::Break));
         }
 
-        Ok(Some(data))
+        Some(Ok(data))
     }
 
     fn read_bytes(&mut self, bytes: &mut [u8]) -> Result<usize, TransBytesError> {
@@ -381,30 +381,32 @@ impl TReciever for Pl011Reciever {
         let mut overrun_data = None;
         for byte in bytes.iter_mut() {
             match self.read_byte() {
-                Ok(Some(b)) => {
+                Some(Ok(b)) => {
                     *byte = b;
-                    count += 1;
                 }
-                Ok(None) => {
+                Some(Err(TransferError::Overrun(b))) => {
+                    overrun_data = Some(b);
+                    *byte = b;
+                }
+                Some(Err(e)) => {
+                    return Err(TransBytesError {
+                        bytes_transferred: count,
+                        kind: e,
+                    });
+                }
+                None => {
                     if let Some(data) = overrun_data {
+                        count = count.saturating_sub(1);
+
                         return Err(TransBytesError {
                             bytes_transferred: count,
                             kind: TransferError::Overrun(data),
                         });
                     }
                     break;
-                } // 无更多数据
-                Err(TransferError::Overrun(data)) => {
-                    overrun_data = Some(data);
-                    *byte = data;
-                }
-                Err(e) => {
-                    return Err(TransBytesError {
-                        bytes_transferred: count,
-                        kind: e,
-                    });
                 }
             }
+            count += 1;
         }
         Ok(count)
     }

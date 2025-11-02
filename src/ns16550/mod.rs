@@ -7,8 +7,6 @@
 // 公共寄存器定义
 mod registers;
 
-use core::usize;
-
 use bitflags::Flags;
 use rdif_serial::{
     Config, ConfigError, DataBits, InterfaceRaw, InterruptMask, Parity, SetBackError, StopBits,
@@ -449,42 +447,36 @@ pub struct Ns16550Reciever<T: Kind> {
     base: T,
 }
 
-impl<T: Kind> Ns16550Reciever<T> {
-    fn new(base: T) -> Self {
-        Self { base }
-    }
-}
-
 impl<T: Kind> TReciever for Ns16550Reciever<T> {
-    fn read_byte(&mut self) -> Result<Option<u8>, TransferError> {
+    fn read_byte(&mut self) -> Option<Result<u8, TransferError>> {
         let lsr: LineStatusFlags = self.base.read_flags(UART_LSR);
 
         // 按优先级检查错误（从高到低）
         if lsr.contains(LineStatusFlags::OVERRUN_ERROR) {
             let b = self.base.read_reg(UART_RBR);
-            return Err(TransferError::Overrun(b));
+            return Some(Err(TransferError::Overrun(b)));
         }
 
         if lsr.contains(LineStatusFlags::PARITY_ERROR) {
             let _b = self.base.read_reg(UART_RBR);
-            return Err(TransferError::Parity);
+            return Some(Err(TransferError::Parity));
         }
 
         if lsr.contains(LineStatusFlags::FRAMING_ERROR) {
             let _b = self.base.read_reg(UART_RBR);
-            return Err(TransferError::Framing);
+            return Some(Err(TransferError::Framing));
         }
 
         if lsr.contains(LineStatusFlags::BREAK_INTERRUPT) {
             let _b = self.base.read_reg(UART_RBR);
-            return Err(TransferError::Break);
+            return Some(Err(TransferError::Break));
         }
 
         if lsr.contains(LineStatusFlags::DATA_READY) {
             let b = self.base.read_reg(UART_RBR);
-            return Ok(Some(b));
+            return Some(Ok(b));
         }
-        Ok(None)
+        None
     }
 }
 
