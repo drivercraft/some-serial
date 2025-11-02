@@ -659,6 +659,7 @@ impl InterfaceRaw for Pl011 {
                 rx.base.0.as_ptr() as _,
             ));
         }
+        self.rx = Some(rx);
         Ok(())
     }
 }
