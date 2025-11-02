@@ -1526,17 +1526,6 @@ dependencies = [
 [[package]]
 name = "rdif-base"
 version = "0.7.0"
-dependencies = [
- "as-any",
- "async-trait",
- "paste",
- "rdif-def",
- "thiserror 2.0.17",
-]
-
-[[package]]
-name = "rdif-base"
-version = "0.7.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "4f8c32d8cbc18633a412130719b07d31135215d1715ac48fc3888ca835a811ba"
 dependencies = [
@@ -1563,7 +1552,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "170ec813e6cf4d1e5fa53fa8fed0fadc7aaab96683d4f1d44c602a6109931eb4"
 dependencies = [
  "cfg-if",
- "rdif-base 0.7.0 (registry+https://github.com/rust-lang/crates.io-index)",
+ "rdif-base",
  "thiserror 2.0.17",
 ]
 
@@ -1574,7 +1563,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "60c6e8dea6d432b2c03bc3f4238dc59a276aacac6f688a937351e7a313918738"
 dependencies = [
  "pci_types",
- "rdif-base 0.7.0 (registry+https://github.com/rust-lang/crates.io-index)",
+ "rdif-base",
  "thiserror 2.0.17",
 ]
 
@@ -1584,17 +1573,19 @@ version = "0.6.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "c7b6eefca0d1b44a5bef1e934d8ab2c8e00e19dd3d9e071855c0933637ee17a0"
 dependencies = [
- "rdif-base 0.7.0 (registry+https://github.com/rust-lang/crates.io-index)",
+ "rdif-base",
 ]
 
 [[package]]
 name = "rdif-serial"
 version = "0.6.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "6668610226177053d66d9d3e55436cfa44f6428a5b755b9d7593288b738e3f12"
 dependencies = [
  "bitflags 2.10.0",
  "futures",
  "heapless 0.9.1",
- "rdif-base 0.7.0",
+ "rdif-base",
  "spin 0.10.0",
  "thiserror 2.0.17",
 ]
@@ -1605,7 +1596,7 @@ version = "0.5.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "e11da4f362ab6cdcdee9d8e795faabd0f15e04167cb17939fd3aca19c2ef3421"
 dependencies = [
- "rdif-base 0.7.0 (registry+https://github.com/rust-lang/crates.io-index)",
+ "rdif-base",
 ]
 
 [[package]]
@@ -1618,7 +1609,7 @@ dependencies = [
  "log",
  "paste",
  "pcie",
- "rdif-base 0.7.0 (registry+https://github.com/rust-lang/crates.io-index)",
+ "rdif-base",
  "rdif-pcie",
  "rdrive-macros",
  "spin 0.10.0",

@@ -1,12 +1,14 @@
 use core::{num::NonZeroU32, ptr::NonNull};
 
 use rdif_serial::{
-    BSerial, InterfaceRaw, SerialDyn, SetBackError, TIrqHandler, TReciever, TSender,
-    TransBytesError, TransferError,
+    BSerial, InterfaceRaw, SerialDyn, SetBackError, TIrqHandler, TSender, TransBytesError,
+    TransferError,
 };
 use tock_registers::{interfaces::*, register_bitfields, register_structs, registers::*};
 
-use crate::{Config, ConfigError, DataBits, InterruptMask, Parity, StopBits};
+use crate::{
+    Config, ConfigError, DataBits, InterruptMask, Parity, RawReciever, RawSender, StopBits,
+};
 
 register_bitfields! [
     u32,
@@ -319,6 +321,10 @@ impl Pl011 {
     pub fn task_tx(&mut self) -> Option<crate::Sender> {
         self.tx.take().map(crate::Sender::Pl011Sender)
     }
+
+    pub fn task_rx(&mut self) -> Option<crate::Reciever> {
+        self.rx.take().map(crate::Reciever::Pl011Reciever)
+    }
 }
 
 #[derive(Clone, Copy, PartialEq, Eq)]
@@ -338,6 +344,12 @@ pub struct Pl011Sender {
 
 impl TSender for Pl011Sender {
     fn write_byte(&mut self, byte: u8) -> bool {
+        RawSender::write_byte(self, byte)
+    }
+}
+
+impl RawSender for Pl011Sender {
+    fn write_byte(&mut self, byte: u8) -> bool {
         if self.base.registers().uartfr.is_set(UARTFR::TXFF) {
             return false;
         }
@@ -352,7 +364,7 @@ pub struct Pl011Reciever {
     base: Reg,
 }
 
-impl TReciever for Pl011Reciever {
+impl RawReciever for Pl011Reciever {
     fn read_byte(&mut self) -> Option<Result<u8, TransferError>> {
         if self.base.registers().uartfr.is_set(UARTFR::RXFE) {
             return None;
@@ -445,7 +457,7 @@ impl InterfaceRaw for Pl011 {
 
     type Sender = crate::Sender;
 
-    type Reciever = Pl011Reciever;
+    type Reciever = crate::Reciever;
 
     fn set_config(&mut self, config: &Config) -> Result<(), ConfigError> {
         use tock_registers::interfaces::Readable;
@@ -606,7 +618,7 @@ impl InterfaceRaw for Pl011 {
     }
 
     fn take_rx(&mut self) -> Option<Self::Reciever> {
-        self.rx.take()
+        self.task_rx()
     }
 
     fn set_tx(&mut self, tx: Self::Sender) -> Result<(), SetBackError> {
@@ -632,14 +644,21 @@ impl InterfaceRaw for Pl011 {
     }
 
     fn set_rx(&mut self, rx: Self::Reciever) -> Result<(), SetBackError> {
+        let rx = match rx {
+            crate::Reciever::Pl011Reciever(r) => r,
+            _ => {
+                return Err(SetBackError::new(
+                    self.base.0.as_ptr() as _,
+                    0, // 无法获取基地址
+                ));
+            }
+        };
         if self.base != rx.base {
             return Err(SetBackError::new(
                 self.base.0.as_ptr() as _,
                 rx.base.0.as_ptr() as _,
             ));
         }
-
-        self.rx = Some(rx);
         Ok(())
     }
 }

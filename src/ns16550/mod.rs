@@ -10,7 +10,7 @@ mod registers;
 use bitflags::Flags;
 use rdif_serial::{
     Config, ConfigError, DataBits, InterfaceRaw, InterruptMask, Parity, SetBackError, StopBits,
-    TIrqHandler, TReciever, TSender, TransferError,
+    TIrqHandler, TSender, TransferError,
 };
 use registers::*;
 
@@ -22,6 +22,8 @@ mod mmio;
 pub use mmio::*;
 #[cfg(any(target_arch = "x86", target_arch = "x86_64"))]
 pub use pio::*;
+
+use crate::{RawReciever, RawSender};
 
 pub trait Kind: Clone + Send + Sync + 'static {
     fn read_reg(&self, reg: u8) -> u8;
@@ -39,16 +41,16 @@ pub trait Kind: Clone + Send + Sync + 'static {
 }
 
 pub struct Ns16550<T: Kind> {
-    base: T,
-    clock_freq: u32,
-    irq: Option<Ns16550IrqHandler<T>>,
-    tx: Option<Ns16550Sender<T>>,
-    rx: Option<Ns16550Reciever<T>>,
+    pub(crate) base: T,
+    pub(crate) clock_freq: u32,
+    pub(crate) irq: Option<Ns16550IrqHandler<T>>,
+    pub(crate) tx: Option<crate::Sender>,
+    pub(crate) rx: Option<crate::Reciever>,
 }
 
 impl<T: Kind> InterfaceRaw for Ns16550<T> {
-    type Sender = Ns16550Sender<T>;
-    type Reciever = Ns16550Reciever<T>;
+    type Sender = crate::Sender;
+    type Reciever = crate::Reciever;
     type IrqHandler = Ns16550IrqHandler<T>;
 
     fn base_addr(&self) -> usize {
@@ -216,9 +218,23 @@ impl<T: Kind> InterfaceRaw for Ns16550<T> {
 
     fn set_tx(&mut self, tx: Self::Sender) -> Result<(), SetBackError> {
         let want = self.base.get_base();
-        let actual = tx.base.get_base();
-        if tx.base.get_base() != want {
-            return Err(SetBackError::new(want, actual));
+        match tx {
+            #[cfg(target_arch = "x86_64")]
+            crate::Sender::Ns16550Sender(ref sender) => {
+                let actual = sender.base.get_base();
+                if actual != want {
+                    return Err(SetBackError::new(want, actual));
+                }
+            }
+            crate::Sender::Ns16550MmioSender(ref sender) => {
+                let actual = sender.base.get_base();
+                if actual != want {
+                    return Err(SetBackError::new(want, actual));
+                }
+            }
+            _ => {
+                return Err(SetBackError::new(want, 0)); // 不匹配的类型
+            }
         }
         self.tx = Some(tx);
         Ok(())
@@ -226,9 +242,23 @@ impl<T: Kind> InterfaceRaw for Ns16550<T> {
 
     fn set_rx(&mut self, rx: Self::Reciever) -> Result<(), SetBackError> {
         let want = self.base.get_base();
-        let actual = rx.base.get_base();
-        if rx.base.get_base() != want {
-            return Err(SetBackError::new(want, actual));
+        match rx {
+            #[cfg(target_arch = "x86_64")]
+            crate::Reciever::Ns16550Reciever(ref reciever) => {
+                let actual = reciever.base.get_base();
+                if actual != want {
+                    return Err(SetBackError::new(want, actual));
+                }
+            }
+            crate::Reciever::Ns16550MmioReciever(ref reciever) => {
+                let actual = reciever.base.get_base();
+                if actual != want {
+                    return Err(SetBackError::new(want, actual));
+                }
+            }
+            _ => {
+                return Err(SetBackError::new(want, 0)); // 不匹配的类型
+            }
         }
         self.rx = Some(rx);
         Ok(())
@@ -236,20 +266,6 @@ impl<T: Kind> InterfaceRaw for Ns16550<T> {
 }
 
 impl<T: Kind> Ns16550<T> {
-    fn new(base: T, clock_freq: u32) -> Self {
-        let irq = Some(Ns16550IrqHandler { base: base.clone() });
-        let tx = Some(Ns16550Sender { base: base.clone() });
-        let rx = Some(Ns16550Reciever { base: base.clone() });
-
-        Self {
-            base,
-            clock_freq,
-            irq,
-            tx,
-            rx,
-        }
-    }
-
     // 基础 u8 寄存器访问（用于除数寄存器等特殊场景）
     fn read_reg_u8(&self, reg: u8) -> u8 {
         self.base.read_reg(reg)
@@ -428,26 +444,20 @@ impl<T: Kind> Ns16550<T> {
 }
 
 pub struct Ns16550Sender<T: Kind> {
-    base: T,
+    pub(crate) base: T,
 }
 
 impl<T: Kind> TSender for Ns16550Sender<T> {
     fn write_byte(&mut self, byte: u8) -> bool {
-        let lsr: LineStatusFlags = self.base.read_flags(UART_LSR);
-        if lsr.contains(LineStatusFlags::TRANSMITTER_HOLDING_EMPTY) {
-            self.base.write_reg(UART_THR, byte);
-            true
-        } else {
-            false
-        }
+        RawSender::write_byte(self, byte)
     }
 }
 
 pub struct Ns16550Reciever<T: Kind> {
-    base: T,
+    pub(crate) base: T,
 }
 
-impl<T: Kind> TReciever for Ns16550Reciever<T> {
+impl<T: Kind> RawReciever for Ns16550Reciever<T> {
     fn read_byte(&mut self) -> Option<Result<u8, TransferError>> {
         let lsr: LineStatusFlags = self.base.read_flags(UART_LSR);
 
@@ -481,7 +491,7 @@ impl<T: Kind> TReciever for Ns16550Reciever<T> {
 }
 
 pub struct Ns16550IrqHandler<T: Kind> {
-    base: T,
+    pub(crate) base: T,
 }
 
 impl<T: Kind> TIrqHandler for Ns16550IrqHandler<T> {
@@ -512,5 +522,17 @@ impl<T: Kind> TIrqHandler for Ns16550IrqHandler<T> {
         }
 
         mask
+    }
+}
+
+impl<T: Kind> RawSender for Ns16550Sender<T> {
+    fn write_byte(&mut self, byte: u8) -> bool {
+        let lsr: LineStatusFlags = self.base.read_flags(UART_LSR);
+        if lsr.contains(LineStatusFlags::TRANSMITTER_HOLDING_EMPTY) {
+            self.base.write_reg(UART_THR, byte);
+            true
+        } else {
+            false
+        }
     }
 }

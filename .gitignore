@@ -3,3 +3,5 @@
 /.spec-workflow
 /CLAUDE.md
 /.claude
+.serena
+.qemu*
