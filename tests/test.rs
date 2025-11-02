@@ -80,6 +80,17 @@ mod tests {
         );
     }
 
+    fn clean_rx(rx: &mut BReciever) {
+        let mut buff = [0u8; 64];
+        loop {
+            match rx.read_bytes(&mut buff) {
+                Ok(0) => break,
+                Ok(_) => {}
+                Err(_) => break,
+            }
+        }
+    }
+
     // === Serial 专用回环测试 ===
 
     /// Serial 基础回环测试 - 验证 Interface trait 基本功能
@@ -115,6 +126,8 @@ mod tests {
                 return;
             }
         };
+
+        clean_rx(&mut rx);
 
         // 测试回环功能
         let test_data = b"Hello\n";
@@ -167,6 +180,7 @@ mod tests {
         serial.disable_interrupts(InterruptMask::TX_EMPTY | InterruptMask::RX_AVAILABLE);
         reset_interrupt_counters();
         let mut rx = serial.take_rx().unwrap();
+        clean_rx(&mut rx);
         // Note: clean_fifo() method is not available in the new interface
         // FIFO is automatically managed by the hardware driver
 
@@ -207,6 +221,7 @@ mod tests {
         // Note: clean_fifo() method is not available in the new interface
         // FIFO is automatically managed by the hardware driver
         reset_interrupt_counters();
+        clean_rx(&mut rx);
 
         // 测试3：启用TX和RX中断
         info!("Test 3: Enable both TX and RX interrupts");
@@ -335,11 +350,6 @@ mod tests {
         None
     }
 
-    /// 获取所有支持的兼容性字符串
-    fn get_supported_compatible_list() -> Vec<&'static str> {
-        vec!["arm,pl011", "snps,dw-apb-uart", "ns16550", "ns16550a"]
-    }
-
     /// 创建统一的测试用 Serial 实例，支持多种驱动类型
     fn create_test_serial() -> BSerial {
         let uart_info =
@@ -400,7 +410,7 @@ mod tests {
             .clocks()
             .next()
             .and_then(|clk| clk.clock_frequency)
-            .unwrap_or_else(|| {
+            .unwrap_or({
                 // 根据设备类型设置默认时钟频率
                 match driver_type {
                     UartDriverType::PL011 => 24_000_000,
@@ -421,39 +431,6 @@ mod tests {
         })
     }
 
-    /// 检查设备状态
-    fn check_device_status<T: core::clone::Clone>(_node: &T, _expected_status: &str) -> bool {
-        // 假设设备树节点有方法获取状态属性
-        // 这里需要根据实际的 bare_test API 来实现
-        // 暂时返回 true，表示设备可用
-        true
-    }
-
-    /// 检查设备是否为 stdout
-    fn check_device_is_stdout<T: core::clone::Clone>(_node: &T) -> bool {
-        // 检查设备是否被用作控制台输出
-        // 这里需要根据实际的设备树结构来实现
-        // 可以通过检查 "linux,stdout-path" 属性或其他方式来判断
-        false
-    }
-
-    // Qemu 环境下无法测试此功能
-    // fn test_overrun(tx: &mut BSender, rx: &mut BReciever) {
-    //     info!("Testing overrun condition...");
-    //     rx.clean_fifo();
-    //     let send = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789";
-    //     let mut left = &send[..];
-    //     let mut buff = [0u8; 256];
-    //     while !left.is_empty() {
-    //         let n = tx.send(left);
-    //         left = &left[n..];
-    //     }
-    //     info!("Sent {} bytes", send.len());
-    //     let res = rx.recive(&mut buff);
-    //     info!("Receive {res:?}");
-    //     assert!(matches!(res, Err(TransferError::Overrun)));
-    // }
-
     /// Serial 回环数据测试函数
     fn test_serial_tx_rx_one(
         s: &mut BSerial,
@@ -466,6 +443,7 @@ mod tests {
         for _ in 0..10000 {
             core::hint::spin_loop();
         }
+        clean_rx(rx);
         // 尽量清空残留数据，避免与本次测试混淆
         // Note: clean_fifo() method is not available in the new interface
         // FIFO is automatically managed by the hardware driver
