@@ -62,3 +62,40 @@ pub mod pl011;
 
 // 重新导出 rdif-serial 的所有类型
 pub use rdif_serial::*;
+
+pub enum Sender {
+    #[cfg(target_arch = "x86_64")]
+    Ns16550Sender(ns16550::Ns16550Sender<ns16550::Port>),
+    Ns16550MmioSender(ns16550::Ns16550Sender<ns16550::Mmio>),
+    Pl011Sender(pl011::Pl011Sender),
+}
+
+impl Sender {
+    pub fn write_byte(&mut self, byte: u8) -> bool {
+        match self {
+            #[cfg(target_arch = "x86_64")]
+            Sender::Ns16550Sender(s) => s.write_byte(byte),
+            Sender::Ns16550MmioSender(s) => s.write_byte(byte),
+            Sender::Pl011Sender(s) => s.write_byte(byte),
+        }
+    }
+
+    pub fn write_bytes(&mut self, buffer: &[u8]) -> usize {
+        match self {
+            #[cfg(target_arch = "x86_64")]
+            Sender::Ns16550Sender(s) => s.write_bytes(buffer),
+            Sender::Ns16550MmioSender(s) => s.write_bytes(buffer),
+            Sender::Pl011Sender(s) => s.write_bytes(buffer),
+        }
+    }
+}
+
+impl TSender for Sender {
+    fn write_byte(&mut self, byte: u8) -> bool {
+        self.write_byte(byte)
+    }
+
+    fn write_bytes(&mut self, buffer: &[u8]) -> usize {
+        self.write_bytes(buffer)
+    }
+}

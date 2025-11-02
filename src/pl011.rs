@@ -315,6 +315,10 @@ impl Pl011 {
             .uartcr
             .modify(UARTCR::UARTEN::SET + UARTCR::TXE::SET + UARTCR::RXE::SET);
     }
+
+    pub fn task_tx(&mut self) -> Option<crate::Sender> {
+        self.tx.take().map(crate::Sender::Pl011Sender)
+    }
 }
 
 #[derive(Clone, Copy, PartialEq, Eq)]
@@ -439,7 +443,7 @@ impl TIrqHandler for Pl011IrqHandler {
 impl InterfaceRaw for Pl011 {
     type IrqHandler = Pl011IrqHandler;
 
-    type Sender = Pl011Sender;
+    type Sender = crate::Sender;
 
     type Reciever = Pl011Reciever;
 
@@ -598,7 +602,7 @@ impl InterfaceRaw for Pl011 {
     }
 
     fn take_tx(&mut self) -> Option<Self::Sender> {
-        self.tx.take()
+        self.task_tx()
     }
 
     fn take_rx(&mut self) -> Option<Self::Reciever> {
@@ -606,6 +610,16 @@ impl InterfaceRaw for Pl011 {
     }
 
     fn set_tx(&mut self, tx: Self::Sender) -> Result<(), SetBackError> {
+        let tx = match tx {
+            crate::Sender::Pl011Sender(s) => s,
+            _ => {
+                return Err(SetBackError::new(
+                    self.base.0.as_ptr() as _,
+                    0, // 无法获取基地址
+                ));
+            }
+        };
+
         if self.base != tx.base {
             return Err(SetBackError::new(
                 self.base.0.as_ptr() as _,

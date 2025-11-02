@@ -2067,6 +2067,7 @@ dependencies = [
  "bare-test-macros",
  "bitflags 2.10.0",
  "dma-api",
+ "enum_dispatch",
  "heapless 0.9.1",
  "log",
  "mbarrier",
