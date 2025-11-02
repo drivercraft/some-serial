@@ -649,7 +649,7 @@ impl InterfaceRaw for Pl011 {
             _ => {
                 return Err(SetBackError::new(
                     self.base.0.as_ptr() as _,
-                    0, // 无法获取基地址
+                    0, // 不匹配的接收器类型
                 ));
             }
         };
