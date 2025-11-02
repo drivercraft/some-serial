@@ -1,10 +1,12 @@
-use core::ptr::NonNull;
+use core::{num::NonZeroU32, ptr::NonNull};
 
-use crate::Register;
-use rdif_serial::{Serial, TransferError};
+use rdif_serial::{
+    BSerial, InterfaceRaw, SerialDyn, SetBackError, TIrqHandler, TReciever, TSender,
+    TransBytesError, TransferError,
+};
 use tock_registers::{interfaces::*, register_bitfields, register_structs, registers::*};
 
-use crate::{Config, ConfigError, DataBits, InterruptMask, LineStatus, Parity, StopBits};
+use crate::{Config, ConfigError, DataBits, InterruptMask, Parity, StopBits};
 
 register_bitfields! [
     u32,
@@ -137,35 +139,43 @@ register_structs! {
 unsafe impl Sync for Pl011Registers {}
 
 /// PL011 UART 驱动结构体
-#[derive(Clone)]
 pub struct Pl011 {
-    base: NonNull<Pl011Registers>,
+    base: Reg,
     clock_freq: u32,
+    tx: Option<Pl011Sender>,
+    rx: Option<Pl011Reciever>,
+    irq: Option<Pl011IrqHandler>,
 }
-
-unsafe impl Send for Pl011 {}
-unsafe impl Sync for Pl011 {}
 
 impl Pl011 {
     /// 创建新的 PL011 实例（仅基地址，使用默认配置）
     ///
     /// # Arguments
     /// * `base` - UART 寄存器基地址
-    pub fn new_no_clock(base: NonNull<u8>) -> Serial<Self> {
+    pub fn new_no_clock(base: NonNull<u8>) -> Self {
         // 自动检测时钟频率或使用合理的默认值
         let clock_freq = Self::detect_clock_frequency(base.as_ptr() as usize);
         Self::new(base, clock_freq)
     }
 
-    pub fn new(base: NonNull<u8>, clock_freq: u32) -> Serial<Self> {
-        Serial::new(Self {
-            base: base.cast(),
+    pub fn new(base: NonNull<u8>, clock_freq: u32) -> Self {
+        let base = Reg(base.cast());
+
+        Self {
+            base,
             clock_freq,
-        })
+            tx: Some(Pl011Sender { base }),
+            rx: Some(Pl011Reciever { base }),
+            irq: Some(Pl011IrqHandler { base }),
+        }
+    }
+
+    pub fn new_boxed(base: NonNull<u8>, clock_freq: u32) -> BSerial {
+        SerialDyn::new_boxed(Self::new(base, clock_freq))
     }
 
     fn registers(&self) -> &Pl011Registers {
-        unsafe { self.base.as_ref() }
+        unsafe { &*self.base.0.as_ptr() }
     }
 
     /// 自动检测或确定合理的时钟频率
@@ -307,13 +317,44 @@ impl Pl011 {
     }
 }
 
-impl Register for Pl011 {
-    fn write_byte(&mut self, byte: u8) {
-        self.registers().uartdr.write(UARTDR::DATA.val(byte as u32));
-    }
+#[derive(Clone, Copy, PartialEq, Eq)]
+struct Reg(NonNull<Pl011Registers>);
 
-    fn read_byte(&mut self) -> Result<u8, TransferError> {
-        let dr = self.registers().uartdr.extract();
+unsafe impl Send for Reg {}
+
+impl Reg {
+    fn registers(&self) -> &Pl011Registers {
+        unsafe { self.0.as_ref() }
+    }
+}
+
+pub struct Pl011Sender {
+    base: Reg,
+}
+
+impl TSender for Pl011Sender {
+    fn write_byte(&mut self, byte: u8) -> bool {
+        if self.base.registers().uartfr.is_set(UARTFR::TXFF) {
+            return false;
+        }
+
+        self.base.registers().uartdr.set(byte as _);
+
+        true
+    }
+}
+
+pub struct Pl011Reciever {
+    base: Reg,
+}
+
+impl TReciever for Pl011Reciever {
+    fn read_byte(&mut self) -> Result<Option<u8>, TransferError> {
+        if self.base.registers().uartfr.is_set(UARTFR::RXFE) {
+            return Ok(None);
+        }
+
+        let dr = self.base.registers().uartdr.extract();
         let data = dr.read(UARTDR::DATA) as u8;
 
         if dr.is_set(UARTDR::FE) {
@@ -332,8 +373,73 @@ impl Register for Pl011 {
             return Err(TransferError::Break);
         }
 
-        Ok(data)
+        Ok(Some(data))
     }
+
+    fn read_bytes(&mut self, bytes: &mut [u8]) -> Result<usize, TransBytesError> {
+        let mut count = 0;
+        let mut overrun_data = None;
+        for byte in bytes.iter_mut() {
+            match self.read_byte() {
+                Ok(Some(b)) => {
+                    *byte = b;
+                    count += 1;
+                }
+                Ok(None) => {
+                    if let Some(data) = overrun_data {
+                        return Err(TransBytesError {
+                            bytes_transferred: count,
+                            kind: TransferError::Overrun(data),
+                        });
+                    }
+                    break;
+                } // 无更多数据
+                Err(TransferError::Overrun(data)) => {
+                    overrun_data = Some(data);
+                    *byte = data;
+                }
+                Err(e) => {
+                    return Err(TransBytesError {
+                        bytes_transferred: count,
+                        kind: e,
+                    });
+                }
+            }
+        }
+        Ok(count)
+    }
+}
+
+pub struct Pl011IrqHandler {
+    base: Reg,
+}
+
+unsafe impl Sync for Pl011IrqHandler {}
+
+impl TIrqHandler for Pl011IrqHandler {
+    fn clean_interrupt_status(&self) -> InterruptMask {
+        let mis = self.base.registers().uartmis.extract();
+        let mut mask = InterruptMask::empty();
+
+        if mis.is_set(UARTIS::RX) {
+            mask |= InterruptMask::RX_AVAILABLE;
+        }
+        if mis.is_set(UARTIS::TX) {
+            mask |= InterruptMask::TX_EMPTY;
+        }
+
+        self.base.registers().uarticr.set(mis.get());
+
+        mask
+    }
+}
+
+impl InterfaceRaw for Pl011 {
+    type IrqHandler = Pl011IrqHandler;
+
+    type Sender = Pl011Sender;
+
+    type Reciever = Pl011Reciever;
 
     fn set_config(&mut self, config: &Config) -> Result<(), ConfigError> {
         use tock_registers::interfaces::Readable;
@@ -439,58 +545,8 @@ impl Register for Pl011 {
         self.registers().uartcr.modify(UARTCR::UARTEN::CLEAR);
     }
 
-    fn clean_interrupt_status(&mut self) -> InterruptMask {
-        let mis = self.registers().uartmis.extract();
-        let mut mask = InterruptMask::empty();
-
-        if mis.is_set(UARTIS::RX) {
-            mask |= InterruptMask::RX_AVAILABLE;
-        }
-        if mis.is_set(UARTIS::TX) {
-            mask |= InterruptMask::TX_EMPTY;
-        }
-
-        self.registers().uarticr.set(mis.get());
-
-        mask
-    }
-
-    fn line_status(&mut self) -> LineStatus {
-        let mut status = LineStatus::empty();
-
-        let fr = self.registers().uartfr.extract();
-
-        if !fr.is_set(UARTFR::RXFE) {
-            status |= LineStatus::DATA_READY;
-        }
-
-        if !fr.is_set(UARTFR::TXFF) {
-            status |= LineStatus::TX_HOLDING_EMPTY;
-        }
-
-        status
-    }
-
-    fn read_reg(&self, offset: usize) -> u32 {
-        let addr = unsafe { self.base.cast::<u8>().add(offset) };
-        unsafe { addr.cast().read_volatile() }
-    }
-
-    fn write_reg(&mut self, offset: usize, value: u32) {
-        let addr = unsafe { self.base.cast::<u8>().add(offset) };
-        unsafe { addr.cast().write_volatile(value) };
-    }
-
-    fn get_base(&self) -> usize {
-        self.base.as_ptr() as usize
-    }
-
-    fn set_base(&mut self, base: usize) {
-        self.base = NonNull::new(base as *mut Pl011Registers).unwrap();
-    }
-
-    fn clock_freq(&self) -> u32 {
-        self.clock_freq
+    fn clock_freq(&self) -> Option<NonZeroU32> {
+        self.clock_freq.try_into().ok()
     }
 
     fn enable_loopback(&mut self) {
@@ -529,6 +585,46 @@ impl Register for Pl011 {
         }
 
         mask
+    }
+
+    fn base_addr(&self) -> usize {
+        self.base.0.as_ptr() as usize
+    }
+
+    fn irq_handler(&mut self) -> Option<Self::IrqHandler> {
+        self.irq.take()
+    }
+
+    fn take_tx(&mut self) -> Option<Self::Sender> {
+        self.tx.take()
+    }
+
+    fn take_rx(&mut self) -> Option<Self::Reciever> {
+        self.rx.take()
+    }
+
+    fn set_tx(&mut self, tx: Self::Sender) -> Result<(), SetBackError> {
+        if self.base != tx.base {
+            return Err(SetBackError::new(
+                self.base.0.as_ptr() as _,
+                tx.base.0.as_ptr() as _,
+            ));
+        }
+
+        self.tx = Some(tx);
+        Ok(())
+    }
+
+    fn set_rx(&mut self, rx: Self::Reciever) -> Result<(), SetBackError> {
+        if self.base != rx.base {
+            return Err(SetBackError::new(
+                self.base.0.as_ptr() as _,
+                rx.base.0.as_ptr() as _,
+            ));
+        }
+
+        self.rx = Some(rx);
+        Ok(())
     }
 }
 

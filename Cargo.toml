@@ -9,7 +9,7 @@ keywords = ["serial", "uart", "embedded", "bare-metal"]
 license = "MIT OR Apache-2.0"
 name = "some-serial"
 repository = "https://github.com/drivercraft/some-serial"
-version = "0.2.4"
+version = "0.3.0"
 
 [dependencies]
 bitflags = "2.10"
@@ -17,8 +17,10 @@ dma-api = {version = "0.5", features = ["alloc"]}
 heapless = "0.9"
 log = "0.4"
 mbarrier = "0.1"
-rdif-base = {version = "0.7"}
-rdif-serial = {version = "0.5.4"}
+# rdif-base = {version = "0.7"}
+# rdif-serial = {version = "0.6.0"}
+rdif-serial = {path = "C:\\Users\\zhoudongsheng\\Documents\\opensource\\rdrive\\interface\\rdif-serial"}
+
 thiserror = {version = "2.0", default-features = false}
 tock-registers = "0.10"
 
