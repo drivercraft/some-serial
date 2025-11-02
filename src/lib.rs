@@ -60,5 +60,83 @@
 pub mod ns16550;
 pub mod pl011;
 
+use enum_dispatch::enum_dispatch;
 // 重新导出 rdif-serial 的所有类型
 pub use rdif_serial::*;
+
+#[enum_dispatch]
+pub enum Sender {
+    #[cfg(target_arch = "x86_64")]
+    Ns16550Sender(ns16550::Ns16550Sender<ns16550::Port>),
+    Ns16550MmioSender(ns16550::Ns16550Sender<ns16550::Mmio>),
+    Pl011Sender(pl011::Pl011Sender),
+}
+
+#[enum_dispatch(Sender)]
+trait RawSender {
+    fn write_byte(&mut self, byte: u8) -> bool;
+    fn write_bytes(&mut self, buffer: &[u8]) -> usize {
+        let mut written = 0;
+        for &byte in buffer.iter() {
+            if !self.write_byte(byte) {
+                break;
+            }
+            written += 1;
+        }
+        written
+    }
+}
+
+impl TSender for Sender {
+    fn write_byte(&mut self, byte: u8) -> bool {
+        RawSender::write_byte(self, byte)
+    }
+
+    fn write_bytes(&mut self, buffer: &[u8]) -> usize {
+        RawSender::write_bytes(self, buffer)
+    }
+}
+
+#[enum_dispatch]
+pub enum Reciever {
+    #[cfg(target_arch = "x86_64")]
+    Ns16550Reciever(ns16550::Ns16550Reciever<ns16550::Port>),
+    Ns16550MmioReciever(ns16550::Ns16550Reciever<ns16550::Mmio>),
+    Pl011Reciever(pl011::Pl011Reciever),
+}
+
+impl TReciever for Reciever {
+    fn read_byte(&mut self) -> Option<Result<u8, TransferError>> {
+        RawReciever::read_byte(self)
+    }
+
+    fn read_bytes(&mut self, bytes: &mut [u8]) -> Result<usize, TransBytesError> {
+        RawReciever::read_bytes(self, bytes)
+    }
+}
+
+#[enum_dispatch(Reciever)]
+trait RawReciever {
+    fn read_byte(&mut self) -> Option<Result<u8, TransferError>>;
+
+    fn read_bytes(&mut self, bytes: &mut [u8]) -> Result<usize, TransBytesError> {
+        let mut read_count = 0;
+        for byte in bytes.iter_mut() {
+            match self.read_byte() {
+                Some(Ok(b)) => {
+                    *byte = b;
+                }
+                Some(Err(e)) => {
+                    return Err(TransBytesError {
+                        bytes_transferred: read_count,
+                        kind: e,
+                    });
+                }
+                None => break,
+            }
+
+            read_count += 1;
+        }
+        Ok(read_count)
+    }
+}

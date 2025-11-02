@@ -17,16 +17,12 @@ impl Kind for Port {
         unsafe { x86::io::inb(self.port + reg as u16) }
     }
 
-    fn write_reg(&mut self, reg: u8, val: u8) {
+    fn write_reg(&self, reg: u8, val: u8) {
         unsafe { x86::io::outb(self.port + reg as u16, val) }
     }
 
     fn get_base(&self) -> usize {
         self.port as _
-    }
-
-    fn set_base(&mut self, base: usize) {
-        self.port = base as _;
     }
 }
 
@@ -37,7 +33,15 @@ impl Ns16550<Port> {
     ///
     /// * `port` - 串口基地址 (如 COM1 为 0x3F8)
     /// * `clock_freq` - UART 时钟频率，通常为 1.8432 MHz
-    pub fn new_port(port: u16, clock_freq: u32) -> crate::Serial<Self> {
-        Self::new(Port { port }, clock_freq)
+    pub fn new_port(port: u16, clock_freq: u32) -> Ns16550<Port> {
+        Ns16550::new(Port { port }, clock_freq)
+    }
+
+    pub fn new_port_boxed(port: u16, clock_freq: u32) -> rdif_serial::BSerial {
+        rdif_serial::SerialDyn::new_boxed(Ns16550::new_port(port, clock_freq))
+    }
+
+    pub fn take_tx(&mut self) -> Option<crate::Sender> {
+        self.tx.take().map(crate::Sender::Ns16550Sender)
     }
 }

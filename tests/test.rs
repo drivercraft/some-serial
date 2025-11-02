@@ -9,7 +9,6 @@ extern crate bare_test;
 #[bare_test::tests]
 mod tests {
     use alloc::{
-        boxed::Box,
         string::{String, ToString},
         vec::Vec,
     };
@@ -20,7 +19,7 @@ mod tests {
         ptr::NonNull,
         sync::atomic::{AtomicBool, AtomicUsize, Ordering},
     };
-    use rdif_serial::{BIrqHandler, BReciever, BSender, BSerial, Interface as _, TransferError};
+    use rdif_serial::{BIrqHandler, BReciever, BSender, BSerial, TransferError};
 
     use super::*;
     use bare_test::{
@@ -81,6 +80,17 @@ mod tests {
         );
     }
 
+    fn clean_rx(rx: &mut BReciever) {
+        let mut buff = [0u8; 64];
+        loop {
+            match rx.read_bytes(&mut buff) {
+                Ok(0) => break,
+                Ok(_) => {}
+                Err(_) => break,
+            }
+        }
+    }
+
     // === Serial 专用回环测试 ===
 
     /// Serial 基础回环测试 - 验证 Interface trait 基本功能
@@ -117,6 +127,8 @@ mod tests {
             }
         };
 
+        clean_rx(&mut rx);
+
         // 测试回环功能
         let test_data = b"Hello\n";
         info!("Testing loopback with data: {test_data:?}");
@@ -152,7 +164,7 @@ mod tests {
 
         let mut bytes = b"TX mask test".as_slice();
         while !bytes.is_empty() {
-            let n = tx.send(bytes).unwrap();
+            let n = tx.write_bytes(bytes);
             bytes = &bytes[n..];
         }
 
@@ -168,7 +180,9 @@ mod tests {
         serial.disable_interrupts(InterruptMask::TX_EMPTY | InterruptMask::RX_AVAILABLE);
         reset_interrupt_counters();
         let mut rx = serial.take_rx().unwrap();
-        rx.clean_fifo();
+        clean_rx(&mut rx);
+        // Note: clean_fifo() method is not available in the new interface
+        // FIFO is automatically managed by the hardware driver
 
         // 测试2：仅启用RX中断
         info!("Test 2: Enable RX interrupt only");
@@ -181,7 +195,7 @@ mod tests {
         let n = bytes.len();
 
         while !bytes.is_empty() {
-            let n = tx.send(bytes).unwrap();
+            let n = tx.write_bytes(bytes);
             bytes = &bytes[n..];
         }
 
@@ -192,7 +206,7 @@ mod tests {
 
         let mut buff = vec![0u8; n + 20];
 
-        let rn = rx.recive(&mut buff).unwrap();
+        let rn = rx.read_bytes(&mut buff).unwrap();
 
         let (tx_count2, rx_count2, _) = get_interrupt_counts();
         serial.disable_loopback();
@@ -204,18 +218,20 @@ mod tests {
 
         // 清理
         serial.disable_interrupts(InterruptMask::TX_EMPTY | InterruptMask::RX_AVAILABLE);
-        rx.clean_fifo();
+        // Note: clean_fifo() method is not available in the new interface
+        // FIFO is automatically managed by the hardware driver
         reset_interrupt_counters();
+        clean_rx(&mut rx);
 
         // 测试3：启用TX和RX中断
         info!("Test 3: Enable both TX and RX interrupts");
         serial.enable_interrupts(InterruptMask::TX_EMPTY | InterruptMask::RX_AVAILABLE);
         serial.enable_loopback();
-        let _ = tx.send(b"Both mask test");
+        let _ = tx.write_bytes(b"Both mask test");
 
         // 等待数据通过回环传输到RX FIFO并触发中断
         // 在读取数据之前让中断处理程序有机会检测到RX中断
-        for i in 0..80000 {
+        for _i in 0..80000 {
             core::hint::spin_loop();
         }
 
@@ -334,11 +350,6 @@ mod tests {
         None
     }
 
-    /// 获取所有支持的兼容性字符串
-    fn get_supported_compatible_list() -> Vec<&'static str> {
-        vec!["arm,pl011", "snps,dw-apb-uart", "ns16550", "ns16550a"]
-    }
-
     /// 创建统一的测试用 Serial 实例，支持多种驱动类型
     fn create_test_serial() -> BSerial {
         let uart_info =
@@ -351,12 +362,10 @@ mod tests {
 
         let mut uart: BSerial = match uart_info.driver_type {
             UartDriverType::PL011 => {
-                let uart = some_serial::pl011::Pl011::new(uart_info.base, uart_info.clk);
-                Box::new(uart)
+                some_serial::pl011::Pl011::new_boxed(uart_info.base, uart_info.clk)
             }
             UartDriverType::Ns16550Mmio => {
-                let uart = some_serial::ns16550::Ns16550::new_mmio(uart_info.base, uart_info.clk);
-                Box::new(uart)
+                some_serial::ns16550::Ns16550::new_mmio_boxed(uart_info.base, uart_info.clk, 4)
             }
         };
 
@@ -401,7 +410,7 @@ mod tests {
             .clocks()
             .next()
             .and_then(|clk| clk.clock_frequency)
-            .unwrap_or_else(|| {
+            .unwrap_or({
                 // 根据设备类型设置默认时钟频率
                 match driver_type {
                     UartDriverType::PL011 => 24_000_000,
@@ -422,39 +431,6 @@ mod tests {
         })
     }
 
-    /// 检查设备状态
-    fn check_device_status<T: core::clone::Clone>(_node: &T, _expected_status: &str) -> bool {
-        // 假设设备树节点有方法获取状态属性
-        // 这里需要根据实际的 bare_test API 来实现
-        // 暂时返回 true，表示设备可用
-        true
-    }
-
-    /// 检查设备是否为 stdout
-    fn check_device_is_stdout<T: core::clone::Clone>(_node: &T) -> bool {
-        // 检查设备是否被用作控制台输出
-        // 这里需要根据实际的设备树结构来实现
-        // 可以通过检查 "linux,stdout-path" 属性或其他方式来判断
-        false
-    }
-
-    // Qemu 环境下无法测试此功能
-    // fn test_overrun(tx: &mut BSender, rx: &mut BReciever) {
-    //     info!("Testing overrun condition...");
-    //     rx.clean_fifo();
-    //     let send = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789";
-    //     let mut left = &send[..];
-    //     let mut buff = [0u8; 256];
-    //     while !left.is_empty() {
-    //         let n = tx.send(left);
-    //         left = &left[n..];
-    //     }
-    //     info!("Sent {} bytes", send.len());
-    //     let res = rx.recive(&mut buff);
-    //     info!("Receive {res:?}");
-    //     assert!(matches!(res, Err(TransferError::Overrun)));
-    // }
-
     /// Serial 回环数据测试函数
     fn test_serial_tx_rx_one(
         s: &mut BSerial,
@@ -467,33 +443,31 @@ mod tests {
         for _ in 0..10000 {
             core::hint::spin_loop();
         }
+        clean_rx(rx);
         // 尽量清空残留数据，避免与本次测试混淆
-        rx.clean_fifo();
+        // Note: clean_fifo() method is not available in the new interface
+        // FIFO is automatically managed by the hardware driver
         let mut retry = 0;
         const RETRY: usize = 10000;
         let mut buff = [0u8; 1];
         for (i, b) in test_data.iter().enumerate() {
             // 发送一个字节
             for _ in 0..RETRY {
-                match tx.send(&[*b]) {
-                    Ok(1) => break,
-                    Err(e) => {
+                let sent = tx.write_bytes(&[*b]);
+                if sent == 1 {
+                    break;
+                } else {
+                    retry += 1;
+                    if retry >= RETRY {
                         s.disable_loopback();
-                        panic!("Send error on byte {}: {:?}", i, e);
-                    }
-                    _ => {
-                        retry += 1;
-                        if retry >= RETRY {
-                            s.disable_loopback();
-                            panic!("Failed to send byte {} after {} retries", i, RETRY);
-                        }
+                        panic!("Failed to send byte {} after {} retries", i, RETRY);
                     }
                 }
             }
             retry = 0;
             // 接收一个字节
             for _ in 0..RETRY {
-                match rx.recive(&mut buff) {
+                match rx.read_bytes(&mut buff) {
                     Ok(1) => {
                         rcv_buff.push(buff[0]);
                         break;
@@ -505,11 +479,15 @@ mod tests {
                             panic!("Failed to receive byte {} after {} retries", i, RETRY);
                         }
                     }
+                    Ok(_) => {
+                        // Received more than expected, just take the first byte
+                        rcv_buff.push(buff[0]);
+                        break;
+                    }
                     Err(e) => {
                         s.disable_loopback();
                         panic!("Receive error on byte {}: {:?}", i, e);
                     }
-                    _ => {}
                 }
             }
         }
@@ -627,11 +605,11 @@ mod tests {
         serial.open().expect("Failed to open serial");
         info!("✓ Serial open successful");
 
-        serial.close();
+        let _ = serial.close();
         info!("✓ Serial close successful");
 
         // 测试 base 地址获取
-        let base_addr = serial.base();
+        let base_addr = serial.base_addr();
         info!("✓ Serial base address: 0x{:x}", base_addr);
 
         info!("✓ Serial DriverGeneric interface test completed");
