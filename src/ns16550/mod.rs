@@ -35,7 +35,7 @@ pub trait Kind: Clone + Send + Sync + 'static {
         F::from_bits_retain(self.read_reg(reg))
     }
 
-    fn write_flags<F: Flags<Bits = u8>>(&mut self, reg: u8, val: F) {
+    fn write_flags<F: Flags<Bits = u8>>(&self, reg: u8, val: F) {
         self.write_reg(reg, val.bits());
     }
 }
