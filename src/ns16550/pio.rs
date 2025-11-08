@@ -2,9 +2,7 @@
 //!
 //! 仅在 x86_64 架构下编译，使用 x86_64 crate 进行端口 I/O
 
-use crate::ns16550::Ns16550;
-
-use super::Kind;
+use super::{Kind, Ns16550, Ns16550IrqHandler, Ns16550Reciever, Ns16550Sender};
 
 /// NS16550 IO Port 版本驱动
 #[derive(Clone, Debug)]
@@ -34,7 +32,17 @@ impl Ns16550<Port> {
     /// * `port` - 串口基地址 (如 COM1 为 0x3F8)
     /// * `clock_freq` - UART 时钟频率，通常为 1.8432 MHz
     pub fn new_port(port: u16, clock_freq: u32) -> Ns16550<Port> {
-        Ns16550::new(Port { port }, clock_freq)
+        let base = Port { port };
+
+        Ns16550 {
+            base: base.clone(),
+            clock_freq,
+            irq: Some(Ns16550IrqHandler { base: base.clone() }),
+            tx: Some(crate::Sender::Ns16550Sender(Ns16550Sender {
+                base: base.clone(),
+            })),
+            rx: Some(crate::Reciever::Ns16550Reciever(Ns16550Reciever { base })),
+        }
     }
 
     pub fn new_port_boxed(port: u16, clock_freq: u32) -> rdif_serial::BSerial {
@@ -42,6 +50,10 @@ impl Ns16550<Port> {
     }
 
     pub fn take_tx(&mut self) -> Option<crate::Sender> {
-        self.tx.take().map(crate::Sender::Ns16550Sender)
+        self.tx.take()
+    }
+
+    pub fn take_rx(&mut self) -> Option<crate::Reciever> {
+        self.rx.take()
     }
 }

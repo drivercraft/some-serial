@@ -58,4 +58,12 @@ impl Ns16550<Mmio> {
     pub fn new_mmio_boxed(base: NonNull<u8>, clock_freq: u32, reg_width: usize) -> BSerial {
         SerialDyn::new_boxed(Ns16550::new_mmio(base, clock_freq, reg_width))
     }
+
+    pub fn take_tx(&mut self) -> Option<crate::Sender> {
+        self.tx.take()
+    }
+
+    pub fn take_rx(&mut self) -> Option<crate::Reciever> {
+        self.rx.take()
+    }
 }
